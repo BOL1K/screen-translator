@@ -18,92 +18,36 @@ NativeMethods.SetProcessDpiAwarenessContext(new IntPtr(-4));
 var hotkeyThread = new Thread(RunScreenshotHotkeyMode) { IsBackground = true };
 hotkeyThread.Start();
 
-Console.WriteLine("Alt+Q — показать перевод слова под курсором.");
-Console.WriteLine("Alt+E — перевести и сразу сохранить слово под курсором в словарь.");
-Console.WriteLine("Alt+W — показать рамки вокруг всех слов на экране (Esc — закрыть).");
-
-while (true)
+// Трей-поток держит процесс живым (он не фоновый) и пунктом "Выход" его завершает.
+TrayIcon.NewTranslationRequested += () => NewTranslationWindow.Show(async (sentence, word, save) =>
 {
-    Console.WriteLine();
-    Console.WriteLine("Команды:");
-    Console.WriteLine("  1 - Новый перевод");
-    Console.WriteLine("  2 - Посмотреть словарь");
-    Console.WriteLine("  3 - Выход");
-    Console.WriteLine("  4 - Выбрать модель / статистика запросов");
-    Console.Write("Введите команду: ");
-    var choice = Console.ReadLine();
-
-    if (choice == "1")
+    if (save)
     {
-        await TranslateAndMaybeSave();
-    }
-    else if (choice == "2")
-    {
-        ShowDictionary();
-    }
-    else if (choice == "3")
-    {
-        break;
-    }
-    else if (choice == "4")
-    {
-        ChooseModel();
+        await SaveTranslation(word, sentence);
     }
     else
     {
-        Console.WriteLine("Не понял команду. Введите 1, 2, 3 или 4.");
+        await ShowTranslation(word, sentence);
     }
-}
+});
+
+TrayIcon.ShowDictionaryRequested += () => DictionaryWindow.Show(LoadEntries());
+TrayIcon.ChooseModelRequested += () => ModelWindow.Show();
+
+TrayIcon.Start();
 
 return;
-
-async Task TranslateAndMaybeSave()
-{
-    Console.Write("Введи предложение на английском: ");
-    var sentence = Console.ReadLine();
-
-    Console.Write("Введи слово из этого предложения: ");
-    var word = Console.ReadLine();
-
-    if (string.IsNullOrWhiteSpace(sentence) || string.IsNullOrWhiteSpace(word))
-    {
-        Console.WriteLine("Предложение и слово не должны быть пустыми.");
-        return;
-    }
-
-    var replyText = await GetTranslationReply(word, sentence);
-    if (replyText is null)
-    {
-        return;
-    }
-
-    Console.WriteLine();
-    Console.WriteLine(replyText);
-
-    var (translation, partOfSpeech, explanation, contextTranslation) = ParseReply(replyText);
-    TranslationPopup.Show(word, translation, partOfSpeech, explanation, contextTranslation);
-
-    Console.Write("Сохранить это слово в словарь? (д/н): ");
-    var save = Console.ReadLine();
-
-    if (save is not ("д" or "Д" or "y" or "Y"))
-    {
-        return;
-    }
-
-    SaveEntry(new DictionaryEntry(word, translation, partOfSpeech, explanation, sentence, contextTranslation));
-    Console.WriteLine("Сохранено.");
-}
 
 async Task<string?> GetTranslationReply(string word, string context)
 {
     var apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
     if (string.IsNullOrWhiteSpace(apiKey))
     {
-        Console.WriteLine("Не найден ключ GEMINI_API_KEY.");
-        Console.WriteLine("Задай его командой в PowerShell:");
-        Console.WriteLine("  setx GEMINI_API_KEY \"твой_ключ\"");
-        Console.WriteLine("После этого перезапусти терминал.");
+        ShowWarning(
+            "Не найден ключ GEMINI_API_KEY.\n\n" +
+            "Задай его командой в PowerShell:\n" +
+            "  setx GEMINI_API_KEY \"твой_ключ\"\n\n" +
+            "После этого перезапусти программу.");
         return null;
     }
 
@@ -136,7 +80,6 @@ async Task<string?> GetTranslationReply(string word, string context)
 
         if (result.Success)
         {
-            ModelManager.RecordUsage(model.Id);
             Console.WriteLine($"Модель: {model.DisplayName}");
             return result.Text;
         }
@@ -154,11 +97,11 @@ async Task<string?> GetTranslationReply(string word, string context)
             continue;
         }
 
-        Console.WriteLine(result.ErrorMessage);
+        ShowWarning(result.ErrorMessage ?? "Неизвестная ошибка при обращении к Gemini API.");
         return null;
     }
 
-    Console.WriteLine("Дневной лимит бесплатных запросов исчерпан на сегодня.");
+    ShowWarning("Дневной лимит бесплатных запросов исчерпан на сегодня.");
     return null;
 }
 
@@ -286,49 +229,10 @@ List<DictionaryEntry> LoadEntries()
     return JsonSerializer.Deserialize<List<DictionaryEntry>>(json) ?? new List<DictionaryEntry>();
 }
 
-void ShowDictionary()
+void ShowWarning(string message)
 {
-    var entries = LoadEntries();
-
-    if (entries.Count == 0)
-    {
-        Console.WriteLine("Словарь пока пуст.");
-        return;
-    }
-
-    for (var i = 0; i < entries.Count; i++)
-    {
-        var e = entries[i];
-        Console.WriteLine($"{i + 1}. {e.Word} — {e.Translation} ({e.PartOfSpeech})");
-        Console.WriteLine($"   Пояснение: {e.Explanation}");
-        Console.WriteLine($"   Предложение: {e.Sentence}");
-        Console.WriteLine($"   Перевод предложения: {e.ContextTranslation}");
-        Console.WriteLine();
-    }
-}
-
-void ChooseModel()
-{
-    Console.WriteLine();
-    Console.WriteLine("Модели (тир-лист, от лучшей к запасной):");
-    ModelManager.PrintModelList();
-    Console.Write("Введите номер модели, чтобы сделать её основной (Enter — оставить как есть): ");
-    var input = Console.ReadLine();
-
-    if (string.IsNullOrWhiteSpace(input))
-    {
-        return;
-    }
-
-    if (int.TryParse(input, out var number) && number >= 1 && number <= ModelManager.Models.Count)
-    {
-        ModelManager.SetHomeModel(number - 1);
-        Console.WriteLine($"Основная модель теперь: {ModelManager.Models[number - 1].DisplayName}");
-    }
-    else
-    {
-        Console.WriteLine("Не понял номер модели.");
-    }
+    const uint mbIconWarning = 0x30;
+    NativeMethods.MessageBox(IntPtr.Zero, message, "Экранный переводчик", mbIconWarning);
 }
 
 void RunScreenshotHotkeyMode()
@@ -349,26 +253,26 @@ void RunScreenshotHotkeyMode()
     if (!showRegistered)
     {
         var errorCode = Marshal.GetLastWin32Error();
-        Console.WriteLine($"Не удалось зарегистрировать горячую клавишу Alt+Q (код ошибки {errorCode}). Похоже, она уже занята другой программой. Попробуйте закрыть программу, которая могла её перехватить, либо сообщите мне — подберём другую комбинацию.");
+        ShowWarning($"Не удалось зарегистрировать горячую клавишу Alt+Q (код ошибки {errorCode}). Похоже, она уже занята другой программой. Попробуйте закрыть программу, которая могла её перехватить, либо сообщите мне — подберём другую комбинацию.");
     }
 
     var saveRegistered = NativeMethods.RegisterHotKey(IntPtr.Zero, hotkeyIdSave, modAlt, vkE);
     if (!saveRegistered)
     {
         var errorCode = Marshal.GetLastWin32Error();
-        Console.WriteLine($"Не удалось зарегистрировать горячую клавишу Alt+E (код ошибки {errorCode}). Похоже, она уже занята другой программой. Попробуйте закрыть программу, которая могла её перехватить, либо сообщите мне — подберём другую комбинацию.");
+        ShowWarning($"Не удалось зарегистрировать горячую клавишу Alt+E (код ошибки {errorCode}). Похоже, она уже занята другой программой. Попробуйте закрыть программу, которая могла её перехватить, либо сообщите мне — подберём другую комбинацию.");
     }
 
     var overlayRegistered = NativeMethods.RegisterHotKey(IntPtr.Zero, hotkeyIdOverlay, modAlt, vkW);
     if (!overlayRegistered)
     {
         var errorCode = Marshal.GetLastWin32Error();
-        Console.WriteLine($"Не удалось зарегистрировать горячую клавишу Alt+W (код ошибки {errorCode}). Похоже, она уже занята другой программой. Попробуйте закрыть программу, которая могла её перехватить, либо сообщите мне — подберём другую комбинацию.");
+        ShowWarning($"Не удалось зарегистрировать горячую клавишу Alt+W (код ошибки {errorCode}). Похоже, она уже занята другой программой. Попробуйте закрыть программу, которая могла её перехватить, либо сообщите мне — подберём другую комбинацию.");
     }
 
     if (!showRegistered && !saveRegistered && !overlayRegistered)
     {
-        Console.WriteLine("Скриншоты по горячим клавишам работать не будут, но остальные функции доступны.");
+        ShowWarning("Скриншоты по горячим клавишам работать не будут, но остальные функции доступны.");
         return;
     }
 
@@ -668,13 +572,13 @@ string BuildWideContext(IReadOnlyList<OcrLine> lines, int lineIndex)
 
 void PrintOcrLanguageMissingMessage()
 {
-    Console.WriteLine();
-    Console.WriteLine("Windows OCR для английского языка недоступен на этом компьютере.");
-    Console.WriteLine("Как включить:");
-    Console.WriteLine("  1. Параметры Windows -> Время и язык -> Язык и регион");
-    Console.WriteLine("  2. Добавить язык -> выбери English");
-    Console.WriteLine("  3. При установке отметь распознавание текста (OCR), если это предложено");
-    Console.WriteLine("  4. Дождись установки и перезапусти программу");
+    ShowWarning(
+        "Windows OCR для английского языка недоступен на этом компьютере.\n\n" +
+        "Как включить:\n" +
+        "1. Параметры Windows -> Время и язык -> Язык и регион\n" +
+        "2. Добавить язык -> выбери English\n" +
+        "3. При установке отметь распознавание текста (OCR), если это предложено\n" +
+        "4. Дождись установки и перезапусти программу");
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -723,6 +627,9 @@ static class NativeMethods
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool PostThreadMessage(uint idThread, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int MessageBox(IntPtr hWnd, string text, string caption, uint type);
 }
 
 record DictionaryEntry(string Word, string Translation, string PartOfSpeech, string Explanation, string Sentence, string ContextTranslation = "");

@@ -14,7 +14,6 @@ static class ModelManager
 
     private static int _homeIndex;
     private static readonly HashSet<string> ExhaustedToday = new();
-    private static readonly Dictionary<string, int> RequestCounts = new();
 
     public static IEnumerable<ModelInfo> GetTryOrder()
     {
@@ -29,27 +28,11 @@ static class ModelManager
         }
     }
 
+    public static int HomeIndex => _homeIndex;
+
     public static void SetHomeModel(int index) => _homeIndex = index;
 
     public static bool IsExhaustedToday(string modelId) => ExhaustedToday.Contains(modelId);
 
     public static void MarkExhaustedToday(string modelId) => ExhaustedToday.Add(modelId);
-
-    public static void RecordUsage(string modelId)
-    {
-        RequestCounts[modelId] = RequestCounts.GetValueOrDefault(modelId) + 1;
-    }
-
-    public static void PrintModelList()
-    {
-        for (var i = 0; i < Models.Count; i++)
-        {
-            var model = Models[i];
-            var marker = i == _homeIndex ? " [ОСНОВНАЯ]" : "";
-            var exhausted = ExhaustedToday.Contains(model.Id) ? " [лимит на сегодня исчерпан]" : "";
-            var count = RequestCounts.GetValueOrDefault(model.Id);
-
-            Console.WriteLine($"  {i + 1}. {model.DisplayName} ({model.Id}) — до {model.DailyLimit}/день — использовано в сессии: {count}{marker}{exhausted}");
-        }
-    }
 }
