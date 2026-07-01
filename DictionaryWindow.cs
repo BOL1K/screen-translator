@@ -40,9 +40,11 @@ static class DictionaryWindow
                     TextWrapping = TextWrapping.Wrap,
                     Margin = new Thickness(0, 0, 0, 4),
                 });
+                AddLine(entryPanel, "Транскрипция", e.Transcription);
+                AddLine(entryPanel, "Подсказка", e.Hint);
+                AddLine(entryPanel, "Пример", e.Sentence);
+                AddLine(entryPanel, "Перевод примера", e.ContextTranslation);
                 AddLine(entryPanel, "Пояснение", e.Explanation);
-                AddLine(entryPanel, "Предложение", e.Sentence);
-                AddLine(entryPanel, "Перевод предложения", e.ContextTranslation);
 
                 panel.Children.Add(entryPanel);
             }

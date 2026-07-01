@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -12,6 +13,27 @@ using Windows.Storage;
 using Windows.Storage.Streams;
 
 const string DictionaryFile = "dictionary.json";
+const string DebugLogFile = "gemini_debug.log";
+
+void LogDebug(string message)
+{
+    try
+    {
+        File.AppendAllText(DebugLogFile, $"[{DateTime.Now:HH:mm:ss.fff}] {message}{Environment.NewLine}");
+    }
+    catch (IOException)
+    {
+    }
+}
+
+string DescribeResult(GeminiCallResult result) => result switch
+{
+    { Success: true } => "успех",
+    { IsNetworkError: true } => "сетевая ошибка/таймаут",
+    { IsDailyQuotaExceeded: true } => "дневной лимит исчерпан",
+    { IsPerMinuteRateLimited: true } => "лимит запросов в минуту (rate limit)",
+    _ => $"ошибка: {result.ErrorMessage}",
+};
 
 NativeMethods.SetProcessDpiAwarenessContext(new IntPtr(-4));
 
@@ -38,7 +60,38 @@ TrayIcon.Start();
 
 return;
 
-async Task<string?> GetTranslationReply(string word, string context)
+string BuildLightPrompt(string word, string context) => $"""
+Слово: "{word}"
+Контекст: "{context}"
+
+Переведи слово на русский с учётом контекста, коротко поясни и переведи весь контекст. Ответь строго в этом формате, без вступлений, каждое поле с новой строки:
+Перевод: <перевод слова>
+Часть речи: <часть речи>
+Пояснение: <краткое пояснение значения в этом контексте>
+Перевод контекста: <перевод контекста на русский>
+""";
+
+string BuildFullPrompt(string word, string context) => $"""
+Слово: "{word}"
+Контекст: "{context}"
+
+Ответь строго в этом формате, без вступлений и лишних слов, каждое поле с новой строки:
+Перевод: <перевод слова с учётом контекста>
+Часть речи: <часть речи>
+Пояснение: <краткое пояснение значения в этом контексте>
+Перевод контекста: <перевод контекста на русский>
+Перевод карточки: <перевод слова на русский БЕЗ самого английского слова, максимально коротко>
+Подсказка: <короткое уточнение значения по-русски для отличия от других значений слова, БЕЗ английского слова, например "(событие, видеться)" или "(быть парой)">
+Транскрипция: <международная фонетическая транскрипция слова в квадратных скобках, например [ˈmiːtɪŋ]>
+""";
+
+async Task<string?> GetLightTranslationReply(string word, string context) =>
+    await RequestGeminiReply(BuildLightPrompt(word, context), "light");
+
+async Task<string?> GetFullTranslationReply(string word, string context) =>
+    await RequestGeminiReply(BuildFullPrompt(word, context), "full");
+
+async Task<string?> RequestGeminiReply(string prompt, string requestLabel)
 {
     var apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
     if (string.IsNullOrWhiteSpace(apiKey))
@@ -51,36 +104,42 @@ async Task<string?> GetTranslationReply(string word, string context)
         return null;
     }
 
-    var prompt = $"""
-    Переведи слово "{word}" на русский язык с учётом окружающего контекста: "{context}"
-    Также переведи весь этот контекст целиком на русский язык.
+    var totalStopwatch = Stopwatch.StartNew();
+    LogDebug($"--- запрос '{requestLabel}' начат ---");
 
-    Ответь кратко в формате:
-    Перевод: ...
-    Часть речи: ...
-    Пояснение: ...
-    Перевод контекста: ...
-    """;
+    var attemptedCount = 0;
+    var networkErrorCount = 0;
 
     foreach (var model in ModelManager.GetTryOrder())
     {
         if (ModelManager.IsExhaustedToday(model.Id))
         {
+            LogDebug($"{model.DisplayName}: пропущена, дневной лимит уже исчерпан");
             continue;
         }
 
+        attemptedCount++;
+
+        var attemptStopwatch = Stopwatch.StartNew();
         var result = await CallGeminiModel(model.Id, apiKey, prompt);
+        attemptStopwatch.Stop();
+        LogDebug($"{model.DisplayName}: попытка заняла {attemptStopwatch.ElapsedMilliseconds}мс, результат: {DescribeResult(result)}");
 
         if (result.IsPerMinuteRateLimited)
         {
             Console.WriteLine($"Модель {model.DisplayName} отвечает слишком часто, жду 2 секунды и пробую снова...");
             await Task.Delay(2000);
+
+            attemptStopwatch.Restart();
             result = await CallGeminiModel(model.Id, apiKey, prompt);
+            attemptStopwatch.Stop();
+            LogDebug($"{model.DisplayName}: повтор после паузы 2с занял {attemptStopwatch.ElapsedMilliseconds}мс, результат: {DescribeResult(result)}");
         }
 
         if (result.Success)
         {
             Console.WriteLine($"Модель: {model.DisplayName}");
+            LogDebug($"--- запрос '{requestLabel}' успешно завершён моделью {model.DisplayName}, всего {totalStopwatch.ElapsedMilliseconds}мс ---");
             return result.Text;
         }
 
@@ -97,11 +156,29 @@ async Task<string?> GetTranslationReply(string word, string context)
             continue;
         }
 
+        if (result.IsNetworkError)
+        {
+            networkErrorCount++;
+            Console.WriteLine($"Модель {model.DisplayName}: сетевая ошибка/таймаут, быстро пробую следующую модель...");
+            continue;
+        }
+
+        LogDebug($"--- запрос '{requestLabel}' прерван ошибкой, всего {totalStopwatch.ElapsedMilliseconds}мс ---");
         ShowWarning(result.ErrorMessage ?? "Неизвестная ошибка при обращении к Gemini API.");
         return null;
     }
 
-    ShowWarning("Дневной лимит бесплатных запросов исчерпан на сегодня.");
+    LogDebug($"--- запрос '{requestLabel}' — все модели исчерпаны/недоступны, всего {totalStopwatch.ElapsedMilliseconds}мс ---");
+
+    if (attemptedCount > 0 && networkErrorCount == attemptedCount)
+    {
+        ShowWarning("Нет связи с сервисом перевода, проверь интернет и попробуй ещё раз.");
+    }
+    else
+    {
+        ShowWarning("Дневной лимит бесплатных запросов исчерпан на сегодня.");
+    }
+
     return null;
 }
 
@@ -123,7 +200,7 @@ async Task<GeminiCallResult> CallGeminiModel(string modelId, string apiKey, stri
 
     var url = $"https://generativelanguage.googleapis.com/v1beta/models/{modelId}:generateContent?key={apiKey}";
 
-    using var client = new HttpClient();
+    using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
     using var content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
 
     string responseText;
@@ -153,9 +230,13 @@ async Task<GeminiCallResult> CallGeminiModel(string modelId, string apiKey, stri
             return new GeminiCallResult(false, null, false, false, $"Ошибка от Gemini API ({(int)response.StatusCode}): {message}");
         }
     }
+    catch (TaskCanceledException)
+    {
+        return new GeminiCallResult(false, null, false, false, "Таймаут запроса к Gemini API (нет ответа за 15 секунд).", IsNetworkError: true);
+    }
     catch (HttpRequestException ex)
     {
-        return new GeminiCallResult(false, null, false, false, $"Не удалось связаться с Gemini API: {ex.Message}");
+        return new GeminiCallResult(false, null, false, false, $"Не удалось связаться с Gemini API: {ex.Message}", IsNetworkError: true);
     }
 
     using var doc = JsonDocument.Parse(responseText);
@@ -209,6 +290,24 @@ string ExtractErrorMessage(string responseText)
     }
 
     return (translation, partOfSpeech, explanation, contextTranslation);
+}
+
+(string CardTranslation, string Hint, string Transcription) ParseCardFields(string reply)
+{
+    string cardTranslation = "", hint = "", transcription = "";
+
+    foreach (var line in reply.Split('\n'))
+    {
+        var trimmed = line.Trim();
+        if (trimmed.StartsWith("Перевод карточки:", StringComparison.OrdinalIgnoreCase))
+            cardTranslation = trimmed["Перевод карточки:".Length..].Trim();
+        else if (trimmed.StartsWith("Подсказка:", StringComparison.OrdinalIgnoreCase))
+            hint = trimmed["Подсказка:".Length..].Trim();
+        else if (trimmed.StartsWith("Транскрипция:", StringComparison.OrdinalIgnoreCase))
+            transcription = trimmed["Транскрипция:".Length..].Trim();
+    }
+
+    return (cardTranslation, hint, transcription);
 }
 
 void SaveEntry(DictionaryEntry entry)
@@ -422,38 +521,39 @@ async Task OnOverlayWordRightClick(string word, string context, Windows.Foundati
     await SaveTranslation(word, context, screenRect);
 }
 
-async Task<(string Translation, string PartOfSpeech, string Explanation, string ContextTranslation)?> ShowTranslation(string word, string context, Windows.Foundation.Rect? screenRect = null)
+async Task ShowTranslation(string word, string context, Windows.Foundation.Rect? screenRect = null)
 {
-    Console.WriteLine();
-    Console.WriteLine($"Слово: {word}");
-    Console.WriteLine($"Контекст: {context}");
-
-    var replyText = await GetTranslationReply(word, context);
+    var replyText = await GetLightTranslationReply(word, context);
     if (replyText is null)
-    {
-        return null;
-    }
-
-    Console.WriteLine();
-    Console.WriteLine(replyText);
-
-    var parsed = ParseReply(replyText);
-    TranslationPopup.Show(word, parsed.Translation, parsed.PartOfSpeech, parsed.Explanation, parsed.ContextTranslation, screenRect);
-
-    return parsed;
-}
-
-async Task SaveTranslation(string word, string context, Windows.Foundation.Rect? screenRect = null)
-{
-    var parsed = await ShowTranslation(word, context, screenRect);
-    if (parsed is null)
     {
         return;
     }
 
-    var (translation, partOfSpeech, explanation, contextTranslation) = parsed.Value;
-    SaveEntry(new DictionaryEntry(word, translation, partOfSpeech, explanation, context, contextTranslation));
-    Console.WriteLine("Сохранено.");
+    var parsed = ParseReply(replyText);
+    TranslationPopup.Show(word, parsed.Translation, parsed.PartOfSpeech, parsed.Explanation, parsed.ContextTranslation, screenRect);
+}
+
+async Task SaveTranslation(string word, string context, Windows.Foundation.Rect? screenRect = null)
+{
+    var replyText = await GetFullTranslationReply(word, context);
+    if (replyText is null)
+    {
+        return;
+    }
+
+    var display = ParseReply(replyText);
+    TranslationPopup.Show(word, display.Translation, display.PartOfSpeech, display.Explanation, display.ContextTranslation, screenRect);
+
+    var card = ParseCardFields(replyText);
+    SaveEntry(new DictionaryEntry(
+        Word: word,
+        Translation: card.CardTranslation,
+        PartOfSpeech: display.PartOfSpeech,
+        Explanation: "",
+        Sentence: context,
+        ContextTranslation: display.ContextTranslation,
+        Hint: card.Hint,
+        Transcription: card.Transcription));
 }
 
 async Task<IReadOnlyList<OcrLine>?> RecognizeLines(string path)
@@ -635,6 +735,14 @@ static class NativeMethods
     public static extern bool DestroyIcon(IntPtr handle);
 }
 
-record DictionaryEntry(string Word, string Translation, string PartOfSpeech, string Explanation, string Sentence, string ContextTranslation = "");
+record DictionaryEntry(
+    string Word,
+    string Translation,
+    string PartOfSpeech,
+    string Explanation,
+    string Sentence,
+    string ContextTranslation = "",
+    string Hint = "",
+    string Transcription = "");
 
-record GeminiCallResult(bool Success, string? Text, bool IsDailyQuotaExceeded, bool IsPerMinuteRateLimited, string? ErrorMessage);
+record GeminiCallResult(bool Success, string? Text, bool IsDailyQuotaExceeded, bool IsPerMinuteRateLimited, string? ErrorMessage, bool IsNetworkError = false);
