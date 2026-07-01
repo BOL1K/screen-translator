@@ -14,8 +14,8 @@ static class Overlay
         List<(string Text, string Context, Windows.Foundation.Rect Rect)> words,
         int originX,
         int originY,
-        Func<string, string, Task> onLeftClick,
-        Func<string, string, Task> onRightClick)
+        Func<string, string, Windows.Foundation.Rect, Task> onLeftClick,
+        Func<string, string, Windows.Foundation.Rect, Task> onRightClick)
     {
         CloseCurrent();
 
@@ -55,9 +55,11 @@ static class Overlay
         List<(string Text, string Context, Windows.Foundation.Rect Rect)> words,
         int originX,
         int originY,
-        Func<string, string, Task> onLeftClick,
-        Func<string, string, Task> onRightClick)
+        Func<string, string, Windows.Foundation.Rect, Task> onLeftClick,
+        Func<string, string, Windows.Foundation.Rect, Task> onRightClick)
     {
+        EscCloseCoordinator.RequestWatcher();
+
         // Alpha=1 (не 0) — визуально неотличимо от прозрачного, но не даёт Windows
         // пропускать события мыши "сквозь" полностью прозрачные пиксели layered-окна.
         var almostInvisible = new SolidColorBrush(Color.FromArgb(1, 0, 0, 0));
@@ -95,7 +97,7 @@ static class Overlay
         };
         canvas.Children.Add(highlight);
 
-        var wordRectsInDip = new List<(string Text, string Context, Rect Rect)>();
+        var wordRectsInDip = new List<(string Text, string Context, Rect DipRect, Windows.Foundation.Rect ScreenRect)>();
 
         window.Loaded += (_, _) =>
         {
@@ -103,11 +105,15 @@ static class Overlay
 
             foreach (var (text, context, rect) in words)
             {
-                wordRectsInDip.Add((text, context, new Rect(
+                var dipRect = new Rect(
                     rect.X / dpi.DpiScaleX,
                     rect.Y / dpi.DpiScaleY,
                     rect.Width / dpi.DpiScaleX,
-                    rect.Height / dpi.DpiScaleY)));
+                    rect.Height / dpi.DpiScaleY);
+
+                var screenRect = new Windows.Foundation.Rect(rect.X + originX, rect.Y + originY, rect.Width, rect.Height);
+
+                wordRectsInDip.Add((text, context, dipRect, screenRect));
             }
 
             window.Activate();
@@ -117,17 +123,17 @@ static class Overlay
         {
             var cursor = e.GetPosition(canvas);
 
-            foreach (var (_, _, rect) in wordRectsInDip)
+            foreach (var (_, _, dipRect, _) in wordRectsInDip)
             {
-                if (!rect.Contains(cursor))
+                if (!dipRect.Contains(cursor))
                 {
                     continue;
                 }
 
-                highlight.Width = rect.Width;
-                highlight.Height = rect.Height;
-                Canvas.SetLeft(highlight, rect.X);
-                Canvas.SetTop(highlight, rect.Y);
+                highlight.Width = dipRect.Width;
+                highlight.Height = dipRect.Height;
+                Canvas.SetLeft(highlight, dipRect.X);
+                Canvas.SetTop(highlight, dipRect.Y);
                 highlight.Visibility = Visibility.Visible;
                 return;
             }
@@ -144,20 +150,20 @@ static class Overlay
 
             var cursor = e.GetPosition(canvas);
 
-            foreach (var (text, context, rect) in wordRectsInDip)
+            foreach (var (text, context, dipRect, screenRect) in wordRectsInDip)
             {
-                if (!rect.Contains(cursor))
+                if (!dipRect.Contains(cursor))
                 {
                     continue;
                 }
 
                 if (e.ChangedButton == MouseButton.Left)
                 {
-                    RunClickAction(() => onLeftClick(text, context));
+                    RunClickAction(() => onLeftClick(text, context, screenRect));
                 }
                 else
                 {
-                    RunClickAction(() => onRightClick(text, context));
+                    RunClickAction(() => onRightClick(text, context, screenRect));
                 }
 
                 return;
@@ -171,6 +177,7 @@ static class Overlay
                 _currentWindow = null;
             }
 
+            EscCloseCoordinator.ReleaseWatcher();
             Dispatcher.ExitAllFrames();
         };
 

@@ -18,9 +18,9 @@ NativeMethods.SetProcessDpiAwarenessContext(new IntPtr(-4));
 var hotkeyThread = new Thread(RunScreenshotHotkeyMode) { IsBackground = true };
 hotkeyThread.Start();
 
-Console.WriteLine("Ctrl+Alt+Q — показать перевод слова под курсором.");
-Console.WriteLine("Ctrl+Alt+E — перевести и сразу сохранить слово под курсором в словарь.");
-Console.WriteLine("Ctrl+Alt+W — показать рамки вокруг всех слов на экране (Esc — закрыть).");
+Console.WriteLine("Alt+Q — показать перевод слова под курсором.");
+Console.WriteLine("Alt+E — перевести и сразу сохранить слово под курсором в словарь.");
+Console.WriteLine("Alt+W — показать рамки вокруг всех слов на экране (Esc — закрыть).");
 
 while (true)
 {
@@ -80,6 +80,9 @@ async Task TranslateAndMaybeSave()
     Console.WriteLine();
     Console.WriteLine(replyText);
 
+    var (translation, partOfSpeech, explanation, contextTranslation) = ParseReply(replyText);
+    TranslationPopup.Show(word, translation, partOfSpeech, explanation, contextTranslation);
+
     Console.Write("Сохранить это слово в словарь? (д/н): ");
     var save = Console.ReadLine();
 
@@ -88,7 +91,6 @@ async Task TranslateAndMaybeSave()
         return;
     }
 
-    var (translation, partOfSpeech, explanation, contextTranslation) = ParseReply(replyText);
     SaveEntry(new DictionaryEntry(word, translation, partOfSpeech, explanation, sentence, contextTranslation));
     Console.WriteLine("Сохранено.");
 }
@@ -335,34 +337,33 @@ void RunScreenshotHotkeyMode()
     const int hotkeyIdSave = 2;
     const int hotkeyIdOverlay = 3;
     const int hotkeyIdCloseOverlay = 4;
-    const uint modControl = 0x0002;
     const uint modAlt = 0x0001;
     const uint vkQ = 0x51;
     const uint vkE = 0x45;
     const uint vkW = 0x57;
     const uint vkEscape = 0x1B;
 
-    var escOverlayHotkeyRegistered = false;
+    EscCloseCoordinator.Init(NativeMethods.GetCurrentThreadId(), hotkeyIdCloseOverlay, vkEscape);
 
-    var showRegistered = NativeMethods.RegisterHotKey(IntPtr.Zero, hotkeyIdShow, modControl | modAlt, vkQ);
+    var showRegistered = NativeMethods.RegisterHotKey(IntPtr.Zero, hotkeyIdShow, modAlt, vkQ);
     if (!showRegistered)
     {
         var errorCode = Marshal.GetLastWin32Error();
-        Console.WriteLine($"Не удалось зарегистрировать горячую клавишу Ctrl+Alt+Q (код ошибки {errorCode}).");
+        Console.WriteLine($"Не удалось зарегистрировать горячую клавишу Alt+Q (код ошибки {errorCode}). Похоже, она уже занята другой программой. Попробуйте закрыть программу, которая могла её перехватить, либо сообщите мне — подберём другую комбинацию.");
     }
 
-    var saveRegistered = NativeMethods.RegisterHotKey(IntPtr.Zero, hotkeyIdSave, modControl | modAlt, vkE);
+    var saveRegistered = NativeMethods.RegisterHotKey(IntPtr.Zero, hotkeyIdSave, modAlt, vkE);
     if (!saveRegistered)
     {
         var errorCode = Marshal.GetLastWin32Error();
-        Console.WriteLine($"Не удалось зарегистрировать горячую клавишу Ctrl+Alt+E (код ошибки {errorCode}).");
+        Console.WriteLine($"Не удалось зарегистрировать горячую клавишу Alt+E (код ошибки {errorCode}). Похоже, она уже занята другой программой. Попробуйте закрыть программу, которая могла её перехватить, либо сообщите мне — подберём другую комбинацию.");
     }
 
-    var overlayRegistered = NativeMethods.RegisterHotKey(IntPtr.Zero, hotkeyIdOverlay, modControl | modAlt, vkW);
+    var overlayRegistered = NativeMethods.RegisterHotKey(IntPtr.Zero, hotkeyIdOverlay, modAlt, vkW);
     if (!overlayRegistered)
     {
         var errorCode = Marshal.GetLastWin32Error();
-        Console.WriteLine($"Не удалось зарегистрировать горячую клавишу Ctrl+Alt+W (код ошибки {errorCode}).");
+        Console.WriteLine($"Не удалось зарегистрировать горячую клавишу Alt+W (код ошибки {errorCode}). Похоже, она уже занята другой программой. Попробуйте закрыть программу, которая могла её перехватить, либо сообщите мне — подберём другую комбинацию.");
     }
 
     if (!showRegistered && !saveRegistered && !overlayRegistered)
@@ -377,6 +378,12 @@ void RunScreenshotHotkeyMode()
 
         while (NativeMethods.GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
         {
+            if (EscCloseCoordinator.IsWatcherRequestMessage(msg.message))
+            {
+                EscCloseCoordinator.HandleWatcherRequestMessage(msg.wParam);
+                continue;
+            }
+
             if (msg.message != wmHotkey)
             {
                 continue;
@@ -391,13 +398,7 @@ void RunScreenshotHotkeyMode()
             if (hotkeyId == hotkeyIdCloseOverlay)
             {
                 Overlay.CloseCurrent();
-
-                if (escOverlayHotkeyRegistered)
-                {
-                    NativeMethods.UnregisterHotKey(IntPtr.Zero, hotkeyIdCloseOverlay);
-                    escOverlayHotkeyRegistered = false;
-                }
-
+                TranslationPopup.CloseCurrent();
                 continue;
             }
 
@@ -418,12 +419,6 @@ void RunScreenshotHotkeyMode()
                 }
 
                 Overlay.Show(words, overlayOriginX, overlayOriginY, OnOverlayWordLeftClick, OnOverlayWordRightClick);
-
-                if (!escOverlayHotkeyRegistered)
-                {
-                    escOverlayHotkeyRegistered = NativeMethods.RegisterHotKey(IntPtr.Zero, hotkeyIdCloseOverlay, 0, vkEscape);
-                }
-
                 continue;
             }
 
@@ -457,10 +452,7 @@ void RunScreenshotHotkeyMode()
             NativeMethods.UnregisterHotKey(IntPtr.Zero, hotkeyIdOverlay);
         }
 
-        if (escOverlayHotkeyRegistered)
-        {
-            NativeMethods.UnregisterHotKey(IntPtr.Zero, hotkeyIdCloseOverlay);
-        }
+        EscCloseCoordinator.Cleanup();
     }
 }
 
@@ -500,8 +492,8 @@ async Task ShowTranslationUnderCursor(string path, int originX, int originY, int
         return;
     }
 
-    var (word, context) = found.Value;
-    await ShowTranslation(word, context);
+    var (word, context, screenRect) = found.Value;
+    await ShowTranslation(word, context, screenRect);
 }
 
 async Task SaveTranslationUnderCursor(string path, int originX, int originY, int cursorScreenX, int cursorScreenY)
@@ -512,21 +504,21 @@ async Task SaveTranslationUnderCursor(string path, int originX, int originY, int
         return;
     }
 
-    var (word, context) = found.Value;
-    await SaveTranslation(word, context);
+    var (word, context, screenRect) = found.Value;
+    await SaveTranslation(word, context, screenRect);
 }
 
-async Task OnOverlayWordLeftClick(string word, string context)
+async Task OnOverlayWordLeftClick(string word, string context, Windows.Foundation.Rect screenRect)
 {
-    await ShowTranslation(word, context);
+    await ShowTranslation(word, context, screenRect);
 }
 
-async Task OnOverlayWordRightClick(string word, string context)
+async Task OnOverlayWordRightClick(string word, string context, Windows.Foundation.Rect screenRect)
 {
-    await SaveTranslation(word, context);
+    await SaveTranslation(word, context, screenRect);
 }
 
-async Task<string?> ShowTranslation(string word, string context)
+async Task<(string Translation, string PartOfSpeech, string Explanation, string ContextTranslation)?> ShowTranslation(string word, string context, Windows.Foundation.Rect? screenRect = null)
 {
     Console.WriteLine();
     Console.WriteLine($"Слово: {word}");
@@ -541,18 +533,21 @@ async Task<string?> ShowTranslation(string word, string context)
     Console.WriteLine();
     Console.WriteLine(replyText);
 
-    return replyText;
+    var parsed = ParseReply(replyText);
+    TranslationPopup.Show(word, parsed.Translation, parsed.PartOfSpeech, parsed.Explanation, parsed.ContextTranslation, screenRect);
+
+    return parsed;
 }
 
-async Task SaveTranslation(string word, string context)
+async Task SaveTranslation(string word, string context, Windows.Foundation.Rect? screenRect = null)
 {
-    var replyText = await ShowTranslation(word, context);
-    if (replyText is null)
+    var parsed = await ShowTranslation(word, context, screenRect);
+    if (parsed is null)
     {
         return;
     }
 
-    var (translation, partOfSpeech, explanation, contextTranslation) = ParseReply(replyText);
+    var (translation, partOfSpeech, explanation, contextTranslation) = parsed.Value;
     SaveEntry(new DictionaryEntry(word, translation, partOfSpeech, explanation, context, contextTranslation));
     Console.WriteLine("Сохранено.");
 }
@@ -617,7 +612,7 @@ async Task<List<(string Text, string Context, Windows.Foundation.Rect Rect)>?> R
     return words;
 }
 
-async Task<(string Word, string Context)?> FindWordAndContextUnderCursor(string path, int originX, int originY, int cursorScreenX, int cursorScreenY)
+async Task<(string Word, string Context, Windows.Foundation.Rect ScreenRect)?> FindWordAndContextUnderCursor(string path, int originX, int originY, int cursorScreenX, int cursorScreenY)
 {
     var lines = await RecognizeLines(path);
     if (lines is null)
@@ -643,7 +638,8 @@ async Task<(string Word, string Context)?> FindWordAndContextUnderCursor(string 
                 continue;
             }
 
-            return (word.Text, BuildWideContext(lines, lineIndex));
+            var screenRect = new Windows.Foundation.Rect(rect.X + originX, rect.Y + originY, rect.Width, rect.Height);
+            return (word.Text, BuildWideContext(lines, lineIndex), screenRect);
         }
     }
 
@@ -721,6 +717,12 @@ static class NativeMethods
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
+
+    [DllImport("kernel32.dll")]
+    public static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool PostThreadMessage(uint idThread, uint msg, IntPtr wParam, IntPtr lParam);
 }
 
 record DictionaryEntry(string Word, string Translation, string PartOfSpeech, string Explanation, string Sentence, string ContextTranslation = "");
