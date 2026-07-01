@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Effects;
 using System.Windows.Threading;
 
 static class TranslationPopup
@@ -32,28 +33,111 @@ static class TranslationPopup
     {
         EscCloseCoordinator.RequestWatcher();
 
-        var panel = new StackPanel { Margin = new Thickness(16), Width = 420 };
+        var panel = new StackPanel { Margin = new Thickness(16), MinWidth = 280, MaxWidth = 400 };
 
         panel.Children.Add(new TextBlock
         {
             Text = word,
-            FontSize = 20,
+            FontSize = 21,
             FontWeight = FontWeights.Bold,
             Foreground = Brushes.White,
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 10),
         });
 
-        AddLine(panel, "Перевод", translation);
-        AddLine(panel, "Часть речи", partOfSpeech);
-        AddLine(panel, "Пояснение", explanation);
-        AddLine(panel, "Перевод предложения", contextTranslation);
-
-        var border = new Border
+        if (!string.IsNullOrWhiteSpace(translation) || !string.IsNullOrWhiteSpace(partOfSpeech))
         {
-            Background = new SolidColorBrush(Color.FromArgb(235, 30, 30, 30)),
-            CornerRadius = new CornerRadius(8),
+            var translationRow = new WrapPanel { Margin = new Thickness(0, 0, 0, 10) };
+
+            if (!string.IsNullOrWhiteSpace(translation))
+            {
+                translationRow.Children.Add(new TextBlock
+                {
+                    Text = translation,
+                    FontSize = 17,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = new SolidColorBrush(Color.FromRgb(0x89, 0xB4, 0xFA)),
+                    TextWrapping = TextWrapping.Wrap,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 8, 0),
+                });
+            }
+
+            if (!string.IsNullOrWhiteSpace(partOfSpeech))
+            {
+                translationRow.Children.Add(new Border
+                {
+                    Background = new SolidColorBrush(Color.FromRgb(0x2A, 0x2A, 0x3C)),
+                    CornerRadius = new CornerRadius(6),
+                    Padding = new Thickness(6, 2, 6, 2),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Child = new TextBlock
+                    {
+                        Text = partOfSpeech.ToUpperInvariant(),
+                        FontSize = 11,
+                        FontStyle = FontStyles.Italic,
+                        Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+                    },
+                });
+            }
+
+            panel.Children.Add(translationRow);
+        }
+
+        if (!string.IsNullOrWhiteSpace(explanation) || !string.IsNullOrWhiteSpace(contextTranslation))
+        {
+            panel.Children.Add(new Border
+            {
+                Height = 1,
+                Background = new SolidColorBrush(Color.FromRgb(0x33, 0x33, 0x33)),
+                Margin = new Thickness(0, 0, 0, 10),
+            });
+        }
+
+        if (!string.IsNullOrWhiteSpace(explanation))
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = explanation,
+                FontSize = 14,
+                Foreground = new SolidColorBrush(Color.FromRgb(0xCC, 0xCC, 0xCC)),
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 6),
+            });
+        }
+
+        if (!string.IsNullOrWhiteSpace(contextTranslation))
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = $"❝ {contextTranslation}",
+                FontSize = 14,
+                FontStyle = FontStyles.Italic,
+                Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 8, 0, 0),
+            });
+        }
+
+        var card = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(235, 30, 30, 46)),
+            CornerRadius = new CornerRadius(12),
             Child = panel,
+            Effect = new DropShadowEffect
+            {
+                Color = Colors.Black,
+                BlurRadius = 20,
+                ShadowDepth = 4,
+                Opacity = 0.5,
+                Direction = 270,
+            },
+        };
+
+        var shadowSpacer = new Border
+        {
+            Margin = new Thickness(16),
+            Child = card,
         };
 
         var window = new Window
@@ -65,7 +149,7 @@ static class TranslationPopup
             ShowInTaskbar = false,
             ResizeMode = ResizeMode.NoResize,
             SizeToContent = SizeToContent.WidthAndHeight,
-            Content = border,
+            Content = shadowSpacer,
         };
 
         if (wordScreenRect is null)
@@ -152,21 +236,5 @@ static class TranslationPopup
         const uint swpNoSize = 0x0001;
         const uint swpNoZOrder = 0x0004;
         NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, (int)x, (int)y, 0, 0, swpNoSize | swpNoZOrder);
-    }
-
-    private static void AddLine(StackPanel panel, string label, string text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return;
-        }
-
-        panel.Children.Add(new TextBlock
-        {
-            Text = $"{label}: {text}",
-            TextWrapping = TextWrapping.Wrap,
-            Foreground = Brushes.White,
-            Margin = new Thickness(0, 0, 0, 6),
-        });
     }
 }

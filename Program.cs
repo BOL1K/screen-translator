@@ -630,6 +630,9 @@ static class NativeMethods
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern int MessageBox(IntPtr hWnd, string text, string caption, uint type);
+
+    [DllImport("user32.dll")]
+    public static extern bool DestroyIcon(IntPtr handle);
 }
 
 record DictionaryEntry(string Word, string Translation, string PartOfSpeech, string Explanation, string Sentence, string ContextTranslation = "");

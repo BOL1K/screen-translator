@@ -91,8 +91,11 @@ static class Overlay
 
         var highlight = new Rectangle
         {
-            Stroke = Brushes.Lime,
-            StrokeThickness = 2,
+            Fill = new SolidColorBrush(Color.FromArgb(77, 0x89, 0xB4, 0xFA)),
+            Stroke = new SolidColorBrush(Color.FromArgb(230, 0x89, 0xB4, 0xFA)),
+            StrokeThickness = 1.5,
+            RadiusX = 4,
+            RadiusY = 4,
             Visibility = Visibility.Collapsed,
         };
         canvas.Children.Add(highlight);
