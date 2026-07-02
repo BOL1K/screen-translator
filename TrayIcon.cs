@@ -5,6 +5,7 @@ using System.Windows.Forms;
 static class TrayIcon
 {
     private static NotifyIcon? _icon;
+    private static ToolStripMenuItem? _autoStartItem;
 
     public static event Action? ShowDictionaryRequested;
     public static event Action? ChooseModelRequested;
@@ -22,7 +23,15 @@ static class TrayIcon
         menu.Items.Add("Посмотреть словарь", null, (_, _) => ShowDictionaryRequested?.Invoke());
         menu.Items.Add("Выбрать модель / статистика", null, (_, _) => ChooseModelRequested?.Invoke());
         menu.Items.Add(new ToolStripSeparator());
+
+        _autoStartItem = new ToolStripMenuItem("Запускать при старте Windows");
+        _autoStartItem.Click += (_, _) => ToggleAutoStart();
+        menu.Items.Add(_autoStartItem);
+
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Выход", null, (_, _) => Exit());
+
+        menu.Opening += (_, _) => RefreshAutoStartState();
 
         _icon = new NotifyIcon
         {
@@ -33,6 +42,26 @@ static class TrayIcon
         };
 
         Application.Run();
+    }
+
+    private static void RefreshAutoStartState()
+    {
+        if (_autoStartItem is not null)
+        {
+            _autoStartItem.Checked = AutoStartManager.IsEnabled();
+        }
+    }
+
+    private static void ToggleAutoStart()
+    {
+        if (_autoStartItem is null)
+        {
+            return;
+        }
+
+        var enable = !AutoStartManager.IsEnabled();
+        AutoStartManager.SetEnabled(enable);
+        _autoStartItem.Checked = enable;
     }
 
     private static void Exit()
