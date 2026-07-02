@@ -24,7 +24,7 @@ static class AnkiExporter
         {
             Filter = "Anki-колода (*.apkg)|*.apkg",
             FileName = $"anki_{DateTime.Now:yyyy-MM-dd_HH-mm}.apkg",
-            InitialDirectory = Directory.GetCurrentDirectory(),
+            InitialDirectory = AppContext.BaseDirectory,
         };
 
         if (dialog.ShowDialog() != DialogResult.OK)

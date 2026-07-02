@@ -3,7 +3,7 @@ using System.Text.Json;
 
 static class DictionaryStore
 {
-    private const string DictionaryFile = "dictionary.json";
+    private static readonly string DictionaryFile = AppPaths.Resolve("dictionary.json");
 
     public static List<DictionaryEntry> Load()
     {

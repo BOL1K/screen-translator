@@ -5,7 +5,7 @@ record AppSettings(string? ApiKey = null);
 
 static class SettingsStore
 {
-    private const string SettingsFile = "settings.json";
+    private static readonly string SettingsFile = AppPaths.Resolve("settings.json");
 
     public static AppSettings Load()
     {

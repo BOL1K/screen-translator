@@ -13,7 +13,7 @@ using Windows.Media.Ocr;
 using Windows.Storage;
 using Windows.Storage.Streams;
 
-const string DebugLogFile = "gemini_debug.log";
+var DebugLogFile = AppPaths.Resolve("gemini_debug.log");
 var russianOcrWarningShown = false;
 
 void LogDebug(string message)
@@ -476,7 +476,7 @@ void RunScreenshotHotkeyMode()
     using var g = Graphics.FromImage(bitmap);
     g.CopyFromScreen(x, y, 0, 0, new Size(width, height));
 
-    var screenshotsDir = Path.Combine(Directory.GetCurrentDirectory(), "screenshots");
+    var screenshotsDir = AppPaths.Resolve("screenshots");
     Directory.CreateDirectory(screenshotsDir);
 
     var fileName = $"screenshot_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.png";
