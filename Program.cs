@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -13,6 +14,7 @@ using Windows.Storage;
 using Windows.Storage.Streams;
 
 const string DebugLogFile = "gemini_debug.log";
+var russianOcrWarningShown = false;
 
 void LogDebug(string message)
 {
@@ -60,13 +62,14 @@ string BuildLightPrompt(string word, string context) => $"""
 
 string BuildFullPrompt(string word, string context) => $"""
 Слово: "{word}"
-Контекст: "{context}"
+Текст вокруг слова (несколько строк экрана, может включать соседние предложения и потерянные OCR знаки препинания): "{context}"
 
-Ответь строго в этом формате, без вступлений и лишних слов, каждое поле с новой строки:
+Сначала найди в этом тексте ТО ОДНО предложение, в котором находится слово "{word}" — без соседних предложений. Дальше работай только с ним. Ответь строго в этом формате, без вступлений и лишних слов, каждое поле с новой строки:
 Перевод: <перевод слова с учётом контекста>
 Часть речи: <часть речи>
 Пояснение: <краткое пояснение значения в этом контексте>
-Перевод контекста: <перевод контекста на русский>
+Предложение: <только то предложение, где встречается слово "{word}", без соседних предложений, дословно как в тексте>
+Перевод контекста: <перевод строки "Предложение" на русский>
 Перевод карточки: <перевод слова на русский БЕЗ самого английского слова, максимально коротко>
 Подсказка: <короткое уточнение значения по-русски для отличия от других значений слова, БЕЗ английского слова, например "(событие, видеться)" или "(быть парой)">
 Транскрипция: <международная фонетическая транскрипция слова в квадратных скобках, например [ˈmiːtɪŋ]>
@@ -279,9 +282,9 @@ string ExtractErrorMessage(string responseText)
     return (translation, partOfSpeech, explanation, contextTranslation);
 }
 
-(string CardTranslation, string Hint, string Transcription) ParseCardFields(string reply)
+(string CardTranslation, string Hint, string Transcription, string Sentence) ParseCardFields(string reply)
 {
-    string cardTranslation = "", hint = "", transcription = "";
+    string cardTranslation = "", hint = "", transcription = "", sentence = "";
 
     foreach (var line in reply.Split('\n'))
     {
@@ -292,9 +295,11 @@ string ExtractErrorMessage(string responseText)
             hint = trimmed["Подсказка:".Length..].Trim();
         else if (trimmed.StartsWith("Транскрипция:", StringComparison.OrdinalIgnoreCase))
             transcription = trimmed["Транскрипция:".Length..].Trim();
+        else if (trimmed.StartsWith("Предложение:", StringComparison.OrdinalIgnoreCase))
+            sentence = trimmed["Предложение:".Length..].Trim();
     }
 
-    return (cardTranslation, hint, transcription);
+    return (cardTranslation, hint, transcription, sentence);
 }
 
 void SaveEntry(DictionaryEntry entry)
@@ -528,12 +533,13 @@ async Task SaveTranslation(string word, string context, Windows.Foundation.Rect?
     TranslationPopup.Show(word, display.Translation, display.PartOfSpeech, display.Explanation, display.ContextTranslation, screenRect);
 
     var card = ParseCardFields(replyText);
+    var sentence = string.IsNullOrWhiteSpace(card.Sentence) ? context : card.Sentence;
     SaveEntry(new DictionaryEntry(
         Word: word,
         Translation: card.CardTranslation,
         PartOfSpeech: display.PartOfSpeech,
         Explanation: "",
-        Sentence: context,
+        Sentence: sentence,
         ContextTranslation: display.ContextTranslation,
         Hint: card.Hint,
         Transcription: card.Transcription,
@@ -541,20 +547,68 @@ async Task SaveTranslation(string word, string context, Windows.Foundation.Rect?
         AddedAt: DateTime.Now));
 }
 
-async Task<IReadOnlyList<OcrLine>?> RecognizeLines(string path)
+async Task<IReadOnlyList<OcrLineResult>?> RecognizeLines(string path)
 {
-    var language = new Language("en");
+    var (preprocessedPath, scale) = OcrPreprocessor.Preprocess(path);
+
+    try
+    {
+        var englishLines = await RunOcrPass(preprocessedPath, "en", scale, isRequired: true);
+        if (englishLines is null)
+        {
+            return null;
+        }
+
+        var russianLines = await RunOcrPass(preprocessedPath, "ru", scale, isRequired: false);
+        if (russianLines is null || russianLines.Count == 0)
+        {
+            return englishLines;
+        }
+
+        return MergeLines(englishLines, russianLines);
+    }
+    finally
+    {
+        try
+        {
+            File.Delete(preprocessedPath);
+        }
+        catch (IOException)
+        {
+        }
+    }
+}
+
+async Task<List<OcrLineResult>?> RunOcrPass(string path, string languageTag, double scale, bool isRequired)
+{
+    var language = new Language(languageTag);
 
     if (!OcrEngine.IsLanguageSupported(language))
     {
-        PrintOcrLanguageMissingMessage();
+        if (isRequired)
+        {
+            PrintOcrLanguageMissingMessage();
+        }
+        else
+        {
+            WarnRussianOcrMissingOnce();
+        }
+
         return null;
     }
 
     var engine = OcrEngine.TryCreateFromLanguage(language);
     if (engine is null)
     {
-        PrintOcrLanguageMissingMessage();
+        if (isRequired)
+        {
+            PrintOcrLanguageMissingMessage();
+        }
+        else
+        {
+            WarnRussianOcrMissingOnce();
+        }
+
         return null;
     }
 
@@ -576,8 +630,103 @@ async Task<IReadOnlyList<OcrLine>?> RecognizeLines(string path)
         ocrBitmap.Dispose();
     }
 
-    return result.Lines;
+    return result.Lines
+        .Select(line => new OcrLineResult(
+            line.Text,
+            line.Words.Select(word => new OcrWordResult(word.Text, ScaleRectDown(word.BoundingRect, scale))).ToList()))
+        .ToList();
 }
+
+Windows.Foundation.Rect ScaleRectDown(Windows.Foundation.Rect rect, double scale) =>
+    new(rect.X / scale, rect.Y / scale, rect.Width / scale, rect.Height / scale);
+
+// Объединяет строки английского и русского прохода. Если строки пересекаются по области —
+// это одно и то же место на экране, распознанное дважды двумя разными языковыми моделями,
+// оставляем ту версию, чей текст больше похож на "свой" алфавит. Если не пересекаются —
+// это разный текст в разных местах экрана, оставляем обе.
+List<OcrLineResult> MergeLines(IReadOnlyList<OcrLineResult> englishLines, IReadOnlyList<OcrLineResult> russianLines)
+{
+    var merged = new List<OcrLineResult>(englishLines);
+
+    foreach (var russianLine in russianLines)
+    {
+        var russianRect = UnionRect(russianLine);
+        if (russianRect is null)
+        {
+            continue;
+        }
+
+        var overlapping = merged.FirstOrDefault(englishLine =>
+        {
+            var englishRect = UnionRect(englishLine);
+            return englishRect is not null && RectsOverlapSignificantly(englishRect.Value, russianRect.Value);
+        });
+
+        if (overlapping is null)
+        {
+            merged.Add(russianLine);
+            continue;
+        }
+
+        var russianRatio = OwnScriptRatio(russianLine.Text, isCyrillic: true);
+        var englishRatio = OwnScriptRatio(overlapping.Text, isCyrillic: false);
+
+        if (russianRatio > englishRatio)
+        {
+            merged.Remove(overlapping);
+            merged.Add(russianLine);
+        }
+    }
+
+    return merged;
+}
+
+Windows.Foundation.Rect? UnionRect(OcrLineResult line)
+{
+    if (line.Words.Count == 0)
+    {
+        return null;
+    }
+
+    var minX = line.Words.Min(w => w.Rect.X);
+    var minY = line.Words.Min(w => w.Rect.Y);
+    var maxX = line.Words.Max(w => w.Rect.X + w.Rect.Width);
+    var maxY = line.Words.Max(w => w.Rect.Y + w.Rect.Height);
+
+    return new Windows.Foundation.Rect(minX, minY, maxX - minX, maxY - minY);
+}
+
+bool RectsOverlapSignificantly(Windows.Foundation.Rect a, Windows.Foundation.Rect b)
+{
+    var x1 = Math.Max(a.X, b.X);
+    var y1 = Math.Max(a.Y, b.Y);
+    var x2 = Math.Min(a.X + a.Width, b.X + b.Width);
+    var y2 = Math.Min(a.Y + a.Height, b.Y + b.Height);
+
+    if (x2 <= x1 || y2 <= y1)
+    {
+        return false;
+    }
+
+    var intersectionArea = (x2 - x1) * (y2 - y1);
+    var smallerArea = Math.Min(a.Width * a.Height, b.Width * b.Height);
+
+    return smallerArea > 0 && intersectionArea / smallerArea > 0.4;
+}
+
+double OwnScriptRatio(string text, bool isCyrillic)
+{
+    var letters = text.Where(char.IsLetter).ToList();
+    if (letters.Count == 0)
+    {
+        return 0;
+    }
+
+    var matching = letters.Count(c => IsCyrillicChar(c) == isCyrillic);
+    return (double)matching / letters.Count;
+}
+
+bool IsCyrillicChar(char c) => c is >= 'Ѐ' and <= 'ӿ';
 
 async Task<List<(string Text, string Context, Windows.Foundation.Rect Rect)>?> RecognizeAllWords(string path)
 {
@@ -594,7 +743,7 @@ async Task<List<(string Text, string Context, Windows.Foundation.Rect Rect)>?> R
 
         foreach (var word in lines[lineIndex].Words)
         {
-            words.Add((word.Text, context, word.BoundingRect));
+            words.Add((word.Text, context, word.Rect));
         }
     }
 
@@ -618,7 +767,7 @@ async Task<(string Word, string Context, Windows.Foundation.Rect ScreenRect)?> F
 
         foreach (var word in line.Words)
         {
-            var rect = word.BoundingRect;
+            var rect = word.Rect;
             var insideWord = cursorImageX >= rect.X && cursorImageX <= rect.X + rect.Width
                 && cursorImageY >= rect.Y && cursorImageY <= rect.Y + rect.Height;
 
@@ -637,7 +786,7 @@ async Task<(string Word, string Context, Windows.Foundation.Rect ScreenRect)?> F
     return null;
 }
 
-string BuildWideContext(IReadOnlyList<OcrLine> lines, int lineIndex)
+string BuildWideContext(IReadOnlyList<OcrLineResult> lines, int lineIndex)
 {
     var contextLines = new List<string>();
     if (lineIndex > 0)
@@ -662,6 +811,25 @@ void PrintOcrLanguageMissingMessage()
         "Как включить:\n" +
         "1. Параметры Windows -> Время и язык -> Язык и регион\n" +
         "2. Добавить язык -> выбери English\n" +
+        "3. При установке отметь распознавание текста (OCR), если это предложено\n" +
+        "4. Дождись установки и перезапусти программу");
+}
+
+void WarnRussianOcrMissingOnce()
+{
+    if (russianOcrWarningShown)
+    {
+        return;
+    }
+
+    russianOcrWarningShown = true;
+    LogDebug("Русский OCR-пакет не найден, распознавание работает только на английском.");
+
+    ShowWarning(
+        "Windows OCR для русского языка недоступен на этом компьютере — распознаётся только английский.\n\n" +
+        "Как включить русский:\n" +
+        "1. Параметры Windows -> Время и язык -> Язык и регион\n" +
+        "2. Добавить язык -> выбери Русский\n" +
         "3. При установке отметь распознавание текста (OCR), если это предложено\n" +
         "4. Дождись установки и перезапусти программу");
 }
@@ -719,6 +887,10 @@ static class NativeMethods
     [DllImport("user32.dll")]
     public static extern bool DestroyIcon(IntPtr handle);
 }
+
+record OcrWordResult(string Text, Windows.Foundation.Rect Rect);
+
+record OcrLineResult(string Text, IReadOnlyList<OcrWordResult> Words);
 
 record DictionaryEntry(
     string Word,
