@@ -6,10 +6,8 @@ static class TrayIcon
 {
     private static NotifyIcon? _icon;
 
-    public static event Action? NewTranslationRequested;
     public static event Action? ShowDictionaryRequested;
     public static event Action? ChooseModelRequested;
-    public static event Action? ExportToAnkiRequested;
 
     public static void Start()
     {
@@ -21,10 +19,8 @@ static class TrayIcon
     private static void RunTrayThread()
     {
         var menu = new ContextMenuStrip();
-        menu.Items.Add("Новый перевод", null, (_, _) => NewTranslationRequested?.Invoke());
         menu.Items.Add("Посмотреть словарь", null, (_, _) => ShowDictionaryRequested?.Invoke());
         menu.Items.Add("Выбрать модель / статистика", null, (_, _) => ChooseModelRequested?.Invoke());
-        menu.Items.Add("Экспорт в Anki", null, (_, _) => ExportToAnkiRequested?.Invoke());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Выход", null, (_, _) => Exit());
 

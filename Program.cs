@@ -40,21 +40,8 @@ var hotkeyThread = new Thread(RunScreenshotHotkeyMode) { IsBackground = true };
 hotkeyThread.Start();
 
 // Трей-поток держит процесс живым (он не фоновый) и пунктом "Выход" его завершает.
-TrayIcon.NewTranslationRequested += () => NewTranslationWindow.Show(async (sentence, word, save) =>
-{
-    if (save)
-    {
-        await SaveTranslation(word, sentence);
-    }
-    else
-    {
-        await ShowTranslation(word, sentence);
-    }
-});
-
 TrayIcon.ShowDictionaryRequested += () => DictionaryWindow.Show(LoadEntries());
 TrayIcon.ChooseModelRequested += () => ModelWindow.Show();
-TrayIcon.ExportToAnkiRequested += () => AnkiExporter.Export(LoadEntries());
 
 TrayIcon.Start();
 
