@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -15,7 +16,61 @@ static class DictionaryWindow
 
     private static void RunWindowThread(List<DictionaryEntry> entries)
     {
-        var window = entries.Count == 0 ? BuildEmptyWindow() : BuildWindowWithEntries(entries);
+        var window = new Window
+        {
+            Title = "Словарь",
+            Width = 480,
+            Height = 500,
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+        };
+
+        var checkBoxes = new List<(CheckBox CheckBox, DictionaryEntry Entry)>();
+
+        void Refresh()
+        {
+            checkBoxes.Clear();
+            window.Content = entries.Count == 0
+                ? BuildEmptyContent()
+                : BuildEntriesContent(entries, checkBoxes, DeleteChecked, DeleteAll);
+        }
+
+        void DeleteChecked()
+        {
+            var toDelete = checkBoxes.Where(x => x.CheckBox.IsChecked == true).Select(x => x.Entry).ToList();
+            if (toDelete.Count == 0)
+            {
+                return;
+            }
+
+            var result = MessageBox.Show($"Удалить {toDelete.Count} слов?", "Экранный переводчик", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (result != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            var toDeleteSet = new HashSet<DictionaryEntry>(toDelete, ReferenceEqualityComparer.Instance);
+            entries.RemoveAll(e => toDeleteSet.Contains(e));
+            DictionaryStore.Save(entries);
+            Refresh();
+        }
+
+        void DeleteAll()
+        {
+            if (entries.Count == 0)
+            {
+                return;
+            }
+
+            var result = MessageBox.Show("Удалить ВСЕ слова? Это нельзя отменить", "Экранный переводчик", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (result != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            entries.Clear();
+            DictionaryStore.Save(entries);
+            Refresh();
+        }
 
         window.KeyDown += (_, e) =>
         {
@@ -23,33 +78,34 @@ static class DictionaryWindow
             {
                 window.Close();
             }
+            else if (e.Key == Key.Delete)
+            {
+                DeleteChecked();
+            }
         };
 
         window.Closed += (_, _) => Dispatcher.ExitAllFrames();
 
+        Refresh();
         window.Show();
         Dispatcher.Run();
     }
 
-    private static Window BuildEmptyWindow()
+    private static TextBlock BuildEmptyContent()
     {
-        return new Window
+        return new TextBlock
         {
-            Title = "Словарь",
-            Width = 480,
-            Height = 500,
-            Content = new TextBlock
-            {
-                Text = "Словарь пока пуст.",
-                Margin = new Thickness(16),
-            },
-            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+            Text = "Словарь пока пуст.",
+            Margin = new Thickness(16),
         };
     }
 
-    private static Window BuildWindowWithEntries(List<DictionaryEntry> entries)
+    private static DockPanel BuildEntriesContent(
+        List<DictionaryEntry> entries,
+        List<(CheckBox CheckBox, DictionaryEntry Entry)> checkBoxes,
+        Action deleteChecked,
+        Action deleteAll)
     {
-        var checkBoxes = new List<(CheckBox CheckBox, DictionaryEntry Entry)>();
         var panel = new StackPanel { Margin = new Thickness(16) };
         int? lastClickedIndex = null;
         var number = 0;
@@ -118,31 +174,26 @@ static class DictionaryWindow
             Content = panel,
         };
 
-        var buttonsPanel = BuildButtonsPanel(checkBoxes);
+        var buttonsPanel = BuildButtonsPanel(checkBoxes, deleteAll);
 
         var root = new DockPanel();
         DockPanel.SetDock(buttonsPanel, Dock.Top);
         root.Children.Add(buttonsPanel);
         root.Children.Add(scrollViewer);
 
-        return new Window
-        {
-            Title = "Словарь",
-            Width = 480,
-            Height = 500,
-            Content = root,
-            WindowStartupLocation = WindowStartupLocation.CenterScreen,
-        };
+        return root;
     }
 
-    private static StackPanel BuildButtonsPanel(List<(CheckBox CheckBox, DictionaryEntry Entry)> checkBoxes)
+    private static StackPanel BuildButtonsPanel(List<(CheckBox CheckBox, DictionaryEntry Entry)> checkBoxes, Action deleteAll)
     {
         var selectAllButton = new Button { Content = "Выделить все", Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(8, 4, 8, 4) };
         var selectNoneButton = new Button { Content = "Снять все", Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(8, 4, 8, 4) };
-        var exportButton = new Button { Content = "Экспортировать в Anki", Padding = new Thickness(8, 4, 8, 4) };
+        var exportButton = new Button { Content = "Экспортировать в Anki", Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(8, 4, 8, 4) };
+        var deleteAllButton = new Button { Content = "Удалить все", Padding = new Thickness(8, 4, 8, 4) };
 
         selectAllButton.Click += (_, _) => SetAllChecked(checkBoxes, true);
         selectNoneButton.Click += (_, _) => SetAllChecked(checkBoxes, false);
+        deleteAllButton.Click += (_, _) => deleteAll();
 
         exportButton.Click += (_, _) =>
         {
@@ -165,6 +216,7 @@ static class DictionaryWindow
         buttonsPanel.Children.Add(selectAllButton);
         buttonsPanel.Children.Add(selectNoneButton);
         buttonsPanel.Children.Add(exportButton);
+        buttonsPanel.Children.Add(deleteAllButton);
 
         return buttonsPanel;
     }

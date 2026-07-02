@@ -12,7 +12,6 @@ using Windows.Media.Ocr;
 using Windows.Storage;
 using Windows.Storage.Streams;
 
-const string DictionaryFile = "dictionary.json";
 const string DebugLogFile = "gemini_debug.log";
 
 void LogDebug(string message)
@@ -313,21 +312,12 @@ string ExtractErrorMessage(string responseText)
 
 void SaveEntry(DictionaryEntry entry)
 {
-    var entries = LoadEntries();
+    var entries = DictionaryStore.Load();
     entries.Add(entry);
-    File.WriteAllText(DictionaryFile, JsonSerializer.Serialize(entries, new JsonSerializerOptions { WriteIndented = true }));
+    DictionaryStore.Save(entries);
 }
 
-List<DictionaryEntry> LoadEntries()
-{
-    if (!File.Exists(DictionaryFile))
-    {
-        return new List<DictionaryEntry>();
-    }
-
-    var json = File.ReadAllText(DictionaryFile);
-    return JsonSerializer.Deserialize<List<DictionaryEntry>>(json) ?? new List<DictionaryEntry>();
-}
+List<DictionaryEntry> LoadEntries() => DictionaryStore.Load();
 
 void ShowWarning(string message)
 {
