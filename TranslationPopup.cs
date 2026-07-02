@@ -1,6 +1,8 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
+using System.Windows.Markup;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
 using System.Windows.Threading;
@@ -33,7 +35,9 @@ static class TranslationPopup
     {
         EscCloseCoordinator.RequestWatcher();
 
-        var panel = new StackPanel { Margin = new Thickness(16), MinWidth = 280, MaxWidth = 400 };
+        // 520 вместо 400 — длинный перевод предложения при узкой карточке рвётся
+        // на много коротких строк и читается плохо; ширина растёт только когда текст длинный.
+        var panel = new StackPanel { Margin = new Thickness(16), MinWidth = 280, MaxWidth = 520 };
 
         panel.Children.Add(new TextBlock
         {
@@ -100,6 +104,7 @@ static class TranslationPopup
             {
                 Text = explanation,
                 FontSize = 14,
+                LineHeight = 20,
                 Foreground = new SolidColorBrush(Color.FromRgb(0xCC, 0xCC, 0xCC)),
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 0, 0, 6),
@@ -108,15 +113,29 @@ static class TranslationPopup
 
         if (!string.IsNullOrWhiteSpace(contextTranslation))
         {
-            panel.Children.Add(new TextBlock
+            var contextText = new TextBlock
             {
                 Text = $"❝ {contextTranslation}",
                 FontSize = 14,
+                LineHeight = 21,
                 FontStyle = FontStyles.Italic,
                 Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xAA, 0xAA)),
                 TextWrapping = TextWrapping.Wrap,
+            };
+
+            // Очень длинный перевод предложения не раздувает попап на весь экран:
+            // выше этой высоты появляется прокрутка (колесо мыши + тонкий скроллбар).
+            var contextScroll = new ScrollViewer
+            {
+                Content = contextText,
+                MaxHeight = 280,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 Margin = new Thickness(0, 8, 0, 0),
-            });
+            };
+            contextScroll.Resources.Add(typeof(ScrollBar), CreateSlimScrollBarStyle());
+
+            panel.Children.Add(contextScroll);
         }
 
         var card = new Border
@@ -182,6 +201,42 @@ static class TranslationPopup
 
         window.Show();
         Dispatcher.Run();
+    }
+
+    // Тонкий тёмный скроллбар под стиль карточки: стандартный светлый системный
+    // выглядит чужеродно на тёмном попапе. Шаблон со вложенным Track.Thumb гораздо
+    // проще описать XAML-строкой, чем городить из FrameworkElementFactory.
+    private static Style CreateSlimScrollBarStyle()
+    {
+        const string xaml = """
+            <Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                   TargetType="ScrollBar">
+              <Setter Property="Width" Value="8"/>
+              <Setter Property="Background" Value="Transparent"/>
+              <Setter Property="Template">
+                <Setter.Value>
+                  <ControlTemplate TargetType="ScrollBar">
+                    <Grid Background="Transparent">
+                      <Track x:Name="PART_Track" IsDirectionReversed="True">
+                        <Track.Thumb>
+                          <Thumb>
+                            <Thumb.Template>
+                              <ControlTemplate TargetType="Thumb">
+                                <Border Background="#697098" Opacity="0.55" CornerRadius="4" Margin="2,0,0,0"/>
+                              </ControlTemplate>
+                            </Thumb.Template>
+                          </Thumb>
+                        </Track.Thumb>
+                      </Track>
+                    </Grid>
+                  </ControlTemplate>
+                </Setter.Value>
+              </Setter>
+            </Style>
+            """;
+
+        return (Style)XamlReader.Parse(xaml);
     }
 
     // Позиция считается в физических пикселях (как SetWindowPos у оверлея) —
