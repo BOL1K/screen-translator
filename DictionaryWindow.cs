@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Threading;
 
@@ -23,6 +24,7 @@ static class DictionaryWindow
             Height = 500,
             WindowStartupLocation = WindowStartupLocation.CenterScreen,
         };
+        AppTheme.ApplyWindow(window);
 
         var checkBoxes = new List<(CheckBox CheckBox, DictionaryEntry Entry)>();
 
@@ -96,6 +98,7 @@ static class DictionaryWindow
         return new TextBlock
         {
             Text = "Словарь пока пуст.",
+            Foreground = AppTheme.TextBrush,
             Margin = new Thickness(16),
         };
     }
@@ -117,6 +120,7 @@ static class DictionaryWindow
                 Text = group.Label,
                 FontWeight = FontWeights.Bold,
                 FontSize = 16,
+                Foreground = AppTheme.HeadingBrush,
                 Margin = new Thickness(0, number == 0 ? 0 : 12, 0, 8),
             });
 
@@ -125,14 +129,24 @@ static class DictionaryWindow
                 var index = number;
                 number++;
 
-                var entryPanel = new StackPanel();
-                entryPanel.Children.Add(new TextBlock
+                var titleBlock = new TextBlock
                 {
-                    Text = $"{index + 1}. {e.Word} — {e.Translation} ({e.PartOfSpeech})",
-                    FontWeight = FontWeights.Bold,
                     TextWrapping = TextWrapping.Wrap,
                     Margin = new Thickness(0, 0, 0, 4),
+                };
+                titleBlock.Inlines.Add(new Run($"{index + 1}. {e.Word}")
+                {
+                    FontWeight = FontWeights.Bold,
+                    Foreground = AppTheme.AccentBrush,
                 });
+                titleBlock.Inlines.Add(new Run($" — {e.Translation} ({e.PartOfSpeech})")
+                {
+                    FontWeight = FontWeights.Bold,
+                    Foreground = AppTheme.HeadingBrush,
+                });
+
+                var entryPanel = new StackPanel();
+                entryPanel.Children.Add(titleBlock);
                 AddLine(entryPanel, "Транскрипция", e.Transcription);
                 AddLine(entryPanel, "Подсказка", e.Hint);
                 AddLine(entryPanel, "Пример", e.Sentence);
@@ -141,9 +155,10 @@ static class DictionaryWindow
 
                 var checkBox = new CheckBox
                 {
+                    Style = AppTheme.CreateCheckBoxStyle(),
                     Content = entryPanel,
                     IsChecked = true,
-                    Margin = new Thickness(0, 0, 0, 16),
+                    Margin = new Thickness(0, 0, 0, 10),
                 };
 
                 checkBox.Click += (_, _) =>
@@ -165,6 +180,7 @@ static class DictionaryWindow
 
                 checkBoxes.Add((checkBox, e));
                 panel.Children.Add(checkBox);
+                panel.Children.Add(AppTheme.CreateDivider(new Thickness(0, 0, 0, 10)));
             }
         }
 
@@ -186,10 +202,11 @@ static class DictionaryWindow
 
     private static StackPanel BuildButtonsPanel(List<(CheckBox CheckBox, DictionaryEntry Entry)> checkBoxes, Action deleteAll)
     {
-        var selectAllButton = new Button { Content = "Выделить все", Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(8, 4, 8, 4) };
-        var selectNoneButton = new Button { Content = "Снять все", Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(8, 4, 8, 4) };
-        var exportButton = new Button { Content = "Экспортировать в Anki", Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(8, 4, 8, 4) };
-        var deleteAllButton = new Button { Content = "Удалить все", Padding = new Thickness(8, 4, 8, 4) };
+        var buttonStyle = AppTheme.CreateButtonStyle();
+        var selectAllButton = new Button { Content = "Выделить все", Style = buttonStyle, Margin = new Thickness(0, 0, 8, 0) };
+        var selectNoneButton = new Button { Content = "Снять все", Style = buttonStyle, Margin = new Thickness(0, 0, 8, 0) };
+        var exportButton = new Button { Content = "Экспортировать в Anki", Style = buttonStyle, Margin = new Thickness(0, 0, 8, 0) };
+        var deleteAllButton = new Button { Content = "Удалить все", Style = buttonStyle };
 
         selectAllButton.Click += (_, _) => SetAllChecked(checkBoxes, true);
         selectNoneButton.Click += (_, _) => SetAllChecked(checkBoxes, false);

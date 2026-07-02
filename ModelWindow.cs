@@ -1,6 +1,8 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 
 static class ModelWindow
@@ -14,7 +16,13 @@ static class ModelWindow
 
     private static void RunWindowThread()
     {
-        var listBox = new ListBox { Margin = new Thickness(16, 16, 16, 8) };
+        var listBox = new ListBox
+        {
+            Margin = new Thickness(16, 16, 16, 8),
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            ItemContainerStyle = AppTheme.CreateListBoxItemStyle(),
+        };
 
         void RefreshList()
         {
@@ -27,14 +35,11 @@ static class ModelWindow
                 var marker = i == ModelManager.HomeIndex ? " [ОСНОВНАЯ]" : "";
                 var exhausted = ModelManager.IsExhaustedToday(model.Id) ? " [лимит на сегодня исчерпан]" : "";
 
-                listBox.Items.Add(new ListBoxItem
-                {
-                    Content = new TextBlock
-                    {
-                        Text = $"{model.DisplayName} — до {model.DailyLimit}/день{marker}{exhausted}",
-                        TextWrapping = TextWrapping.Wrap,
-                    },
-                });
+                var itemText = new TextBlock { TextWrapping = TextWrapping.Wrap };
+                itemText.Inlines.Add(new Run(model.DisplayName) { FontWeight = FontWeights.Bold, Foreground = AppTheme.HeadingBrush });
+                itemText.Inlines.Add(new Run($" — до {model.DailyLimit}/день{marker}{exhausted}") { Foreground = AppTheme.TextBrush });
+
+                listBox.Items.Add(new ListBoxItem { Content = itemText });
             }
 
             if (selectedIndex >= 0 && selectedIndex < listBox.Items.Count)
@@ -57,7 +62,7 @@ static class ModelWindow
         var makeHomeButton = new Button
         {
             Content = "Сделать основной",
-            Padding = new Thickness(12, 4, 12, 4),
+            Style = AppTheme.CreateButtonStyle(),
             HorizontalAlignment = HorizontalAlignment.Right,
             Margin = new Thickness(16, 0, 16, 16),
         };
@@ -78,6 +83,7 @@ static class ModelWindow
             Content = root,
             WindowStartupLocation = WindowStartupLocation.CenterScreen,
         };
+        AppTheme.ApplyWindow(window);
 
         window.KeyDown += (_, e) =>
         {

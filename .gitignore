@@ -3,7 +3,8 @@ dictionary.json
 gemini_debug.log
 screenshots/
 
-# Секреты (на всякий случай — ключ должен браться только из переменной окружения GEMINI_API_KEY)
+# Секреты — свой Gemini API-ключ (settings.json) или переменная окружения GEMINI_API_KEY
+settings.json
 *.env
 .env
 

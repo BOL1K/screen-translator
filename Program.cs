@@ -81,17 +81,30 @@ async Task<string?> GetLightTranslationReply(string word, string context) =>
 async Task<string?> GetFullTranslationReply(string word, string context) =>
     await RequestGeminiReply(BuildFullPrompt(word, context), "full");
 
+string? GetApiKey()
+{
+    var fromSettings = SettingsStore.Load().ApiKey;
+    if (!string.IsNullOrWhiteSpace(fromSettings))
+    {
+        return fromSettings;
+    }
+
+    var fromEnv = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
+    return string.IsNullOrWhiteSpace(fromEnv) ? null : fromEnv;
+}
+
 async Task<string?> RequestGeminiReply(string prompt, string requestLabel)
 {
-    var apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
+    var apiKey = GetApiKey();
     if (string.IsNullOrWhiteSpace(apiKey))
     {
-        ShowWarning(
-            "Не найден ключ GEMINI_API_KEY.\n\n" +
-            "Задай его командой в PowerShell:\n" +
-            "  setx GEMINI_API_KEY \"твой_ключ\"\n\n" +
-            "После этого перезапусти программу.");
-        return null;
+        apiKey = SettingsWindow.ShowAndWaitForKey(
+            "Вставь свой бесплатный Gemini API-ключ.\nПолучить: https://aistudio.google.com");
+
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return null;
+        }
     }
 
     var totalStopwatch = Stopwatch.StartNew();
