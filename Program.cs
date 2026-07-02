@@ -399,7 +399,12 @@ void RunScreenshotHotkeyMode()
                     continue;
                 }
 
-                Overlay.Show(words, overlayOriginX, overlayOriginY, OnOverlayWordLeftClick, OnOverlayWordRightClick);
+                Overlay.Show(
+                    words,
+                    overlayOriginX,
+                    overlayOriginY,
+                    OnOverlayWordLeftClick,
+                    (word, context, screenRect) => OnOverlayWordRightClick(word, context, screenRect, overlayScreenshotPath));
                 continue;
             }
 
@@ -486,7 +491,7 @@ async Task SaveTranslationUnderCursor(string path, int originX, int originY, int
     }
 
     var (word, context, screenRect) = found.Value;
-    await SaveTranslation(word, context, screenRect);
+    await SaveTranslation(word, context, screenRect, path);
 }
 
 async Task OnOverlayWordLeftClick(string word, string context, Windows.Foundation.Rect screenRect)
@@ -494,9 +499,9 @@ async Task OnOverlayWordLeftClick(string word, string context, Windows.Foundatio
     await ShowTranslation(word, context, screenRect);
 }
 
-async Task OnOverlayWordRightClick(string word, string context, Windows.Foundation.Rect screenRect)
+async Task OnOverlayWordRightClick(string word, string context, Windows.Foundation.Rect screenRect, string screenshotPath)
 {
-    await SaveTranslation(word, context, screenRect);
+    await SaveTranslation(word, context, screenRect, screenshotPath);
 }
 
 async Task ShowTranslation(string word, string context, Windows.Foundation.Rect? screenRect = null)
@@ -511,7 +516,7 @@ async Task ShowTranslation(string word, string context, Windows.Foundation.Rect?
     TranslationPopup.Show(word, parsed.Translation, parsed.PartOfSpeech, parsed.Explanation, parsed.ContextTranslation, screenRect);
 }
 
-async Task SaveTranslation(string word, string context, Windows.Foundation.Rect? screenRect = null)
+async Task SaveTranslation(string word, string context, Windows.Foundation.Rect? screenRect = null, string? screenshotPath = null)
 {
     var replyText = await GetFullTranslationReply(word, context);
     if (replyText is null)
@@ -532,6 +537,7 @@ async Task SaveTranslation(string word, string context, Windows.Foundation.Rect?
         ContextTranslation: display.ContextTranslation,
         Hint: card.Hint,
         Transcription: card.Transcription,
+        ScreenshotPath: screenshotPath,
         AddedAt: DateTime.Now));
 }
 
@@ -723,6 +729,7 @@ record DictionaryEntry(
     string ContextTranslation = "",
     string Hint = "",
     string Transcription = "",
-    DateTime? AddedAt = null);
+    DateTime? AddedAt = null,
+    string? ScreenshotPath = null);
 
 record GeminiCallResult(bool Success, string? Text, bool IsDailyQuotaExceeded, bool IsPerMinuteRateLimited, string? ErrorMessage, bool IsNetworkError = false);

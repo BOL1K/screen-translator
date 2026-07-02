@@ -237,7 +237,7 @@ static class DictionaryWindow
             .Where(e => e.AddedAt.HasValue)
             .GroupBy(e => e.AddedAt!.Value.Date)
             .OrderByDescending(g => g.Key)
-            .Select(g => (Label: FormatDateLabel(g.Key, today), Entries: g.ToList()));
+            .Select(g => (Label: FormatDateLabel(g.Key, today), Entries: g.OrderByDescending(e => e.AddedAt!.Value).ToList()));
 
         foreach (var group in dated)
         {

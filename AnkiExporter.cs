@@ -1,5 +1,7 @@
 using System.IO;
+using System.IO.Compression;
 using System.Net;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using AnkiNet;
@@ -48,14 +50,56 @@ static class AnkiExporter
         var noteTypeId = collection.CreateNoteType(noteType);
         var deckId = collection.CreateDeck(DeckName);
 
+        // Anki.NET не умеет вкладывать медиа в .apkg сам (пишет пустой манифест),
+        // поэтому картинки добавляем руками ниже, распаковав уже написанный архив.
+        var mediaFiles = new List<(string SourcePath, string DisplayName)>();
+
         foreach (var entry in exportable)
         {
-            collection.CreateNote(deckId, noteTypeId, BuildFront(entry), BuildBack(entry));
+            string? mediaFileName = null;
+            if (!string.IsNullOrWhiteSpace(entry.ScreenshotPath) && File.Exists(entry.ScreenshotPath))
+            {
+                var ext = Path.GetExtension(entry.ScreenshotPath);
+                mediaFileName = $"screenshot_{mediaFiles.Count}{ext}";
+                mediaFiles.Add((entry.ScreenshotPath, mediaFileName));
+            }
+
+            collection.CreateNote(deckId, noteTypeId, BuildFront(entry), BuildBack(entry, mediaFileName));
         }
 
         AnkiFileWriter.WriteToFileAsync(dialog.FileName, collection).GetAwaiter().GetResult();
 
+        if (mediaFiles.Count > 0)
+        {
+            EmbedMedia(dialog.FileName, mediaFiles);
+        }
+
         MessageBox.Show($"Экспортировано {exportable.Count} карточек в файл {dialog.FileName}.", "Экранный переводчик");
+    }
+
+    private static void EmbedMedia(string apkgPath, List<(string SourcePath, string DisplayName)> mediaFiles)
+    {
+        using var archive = ZipFile.Open(apkgPath, ZipArchiveMode.Update);
+
+        archive.GetEntry("media")?.Delete();
+
+        var manifest = new Dictionary<string, string>();
+
+        for (var i = 0; i < mediaFiles.Count; i++)
+        {
+            var (sourcePath, displayName) = mediaFiles[i];
+            var key = i.ToString();
+            manifest[key] = displayName;
+
+            var entry = archive.CreateEntry(key);
+            using var entryStream = entry.Open();
+            using var fileStream = File.OpenRead(sourcePath);
+            fileStream.CopyTo(entryStream);
+        }
+
+        var mediaEntry = archive.CreateEntry("media");
+        using var writer = new StreamWriter(mediaEntry.Open());
+        writer.Write(JsonSerializer.Serialize(manifest));
     }
 
     private static string BuildFront(DictionaryEntry entry)
@@ -67,7 +111,7 @@ static class AnkiExporter
             : $"{translation} ({WebUtility.HtmlEncode(entry.Hint)})";
     }
 
-    private static string BuildBack(DictionaryEntry entry)
+    private static string BuildBack(DictionaryEntry entry, string? mediaFileName)
     {
         var parts = new List<string>();
 
@@ -86,6 +130,11 @@ static class AnkiExporter
         if (!string.IsNullOrWhiteSpace(entry.ContextTranslation))
         {
             parts.Add(WebUtility.HtmlEncode(entry.ContextTranslation));
+        }
+
+        if (mediaFileName is not null)
+        {
+            parts.Add($"<img src=\"{WebUtility.HtmlEncode(mediaFileName)}\">");
         }
 
         return string.Join("<br><br>", parts);
