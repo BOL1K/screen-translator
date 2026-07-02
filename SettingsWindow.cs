@@ -2,8 +2,10 @@ using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
-using System.Windows.Navigation;
+using System.Windows.Media;
 using System.Windows.Threading;
+using Windows.Globalization;
+using Windows.Media.Ocr;
 
 static class SettingsWindow
 {
@@ -71,9 +73,11 @@ static class SettingsWindow
             Margin = new Thickness(0, 0, 0, 4),
         });
 
+        var settings = SettingsStore.Load();
+
         var keyBox = new TextBox
         {
-            Text = SettingsStore.Load().ApiKey ?? "",
+            Text = settings.ApiKey ?? "",
             Background = AppTheme.ButtonBackground,
             Foreground = AppTheme.HeadingBrush,
             CaretBrush = AppTheme.HeadingBrush,
@@ -85,6 +89,71 @@ static class SettingsWindow
         panel.Children.Add(keyBox);
 
         panel.Children.Add(AppTheme.CreateDivider());
+
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Изучаемый язык",
+            Foreground = AppTheme.TextBrush,
+            Margin = new Thickness(0, 10, 0, 4),
+        });
+
+        var currentLanguage = StudyLanguages.FromCode(settings.StudyLanguageCode);
+
+        var languageList = new ListBox
+        {
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            ItemContainerStyle = AppTheme.CreateListBoxItemStyle(),
+            Margin = new Thickness(0, 0, 0, 2),
+        };
+
+        foreach (var language in StudyLanguages.All)
+        {
+            var hasOcrPack = OcrEngine.IsLanguageSupported(new Language(language.OcrTag));
+
+            var itemText = new TextBlock { TextWrapping = TextWrapping.Wrap };
+            itemText.Inlines.Add(new Run(language.DisplayName) { Foreground = AppTheme.HeadingBrush });
+            if (!hasOcrPack)
+            {
+                itemText.Inlines.Add(new Run("  — нет OCR-пакета Windows") { Foreground = AppTheme.TextBrush, FontStyle = FontStyles.Italic });
+            }
+
+            languageList.Items.Add(new ListBoxItem { Content = itemText, Tag = language });
+        }
+
+        languageList.SelectedIndex = StudyLanguages.All.FindIndex(l => l.Code == currentLanguage.Code);
+        panel.Children.Add(languageList);
+
+        var ocrHint = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = AppTheme.TextBrush,
+            FontStyle = FontStyles.Italic,
+            Margin = new Thickness(0, 2, 0, 10),
+            Visibility = Visibility.Collapsed,
+        };
+        panel.Children.Add(ocrHint);
+
+        StudyLanguage? SelectedLanguage() => (languageList.SelectedItem as ListBoxItem)?.Tag as StudyLanguage;
+
+        void RefreshOcrHint()
+        {
+            var selected = SelectedLanguage();
+            if (selected is null || OcrEngine.IsLanguageSupported(new Language(selected.OcrTag)))
+            {
+                ocrHint.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            ocrHint.Text =
+                $"Для языка «{selected.DisplayName}» не установлен OCR-пакет Windows — распознавание слов с экрана не заработает, пока его не добавить:\n" +
+                "Параметры Windows -> Время и язык -> Язык и регион -> Добавить язык -> " +
+                $"{selected.DisplayName} ({selected.NativeName}), при установке отметь «Распознавание текста (OCR)», затем перезапусти программу.";
+            ocrHint.Visibility = Visibility.Visible;
+        }
+
+        languageList.SelectionChanged += (_, _) => RefreshOcrHint();
+        RefreshOcrHint();
 
         panel.Children.Add(new TextBlock
         {
@@ -122,7 +191,8 @@ static class SettingsWindow
                 return;
             }
 
-            SettingsStore.Save(new AppSettings(value));
+            var selectedLanguage = SelectedLanguage() ?? currentLanguage;
+            SettingsStore.Save(new AppSettings(value, selectedLanguage.Code));
             savedKey = value;
             window.Close();
         };

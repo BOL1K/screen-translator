@@ -22,7 +22,7 @@ static class TrayIcon
         var menu = new ContextMenuStrip();
         menu.Items.Add("Посмотреть словарь", null, (_, _) => ShowDictionaryRequested?.Invoke());
         menu.Items.Add("Выбрать модель / статистика", null, (_, _) => ChooseModelRequested?.Invoke());
-        menu.Items.Add("Настройки (API-ключ)", null, (_, _) => SettingsWindow.Show());
+        menu.Items.Add("Настройки (API-ключ, язык)", null, (_, _) => SettingsWindow.Show());
         menu.Items.Add(new ToolStripSeparator());
 
         _autoStartItem = new ToolStripMenuItem("Запускать при старте Windows");

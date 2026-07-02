@@ -49,9 +49,10 @@ TrayIcon.Start();
 
 return;
 
-string BuildLightPrompt(string word, string context) => $"""
+string BuildLightPrompt(string word, string context, StudyLanguage language) => $"""
 Ты — точный словарь-переводчик для человека, изучающего иностранный язык.
 
+Язык слова и контекста: {language.RussianName}. Переводить нужно на русский.
 Слово: "{word}"
 Контекст: "{context}"
 
@@ -71,9 +72,10 @@ string BuildLightPrompt(string word, string context) => $"""
 Перевод контекста: <перевод всего контекста на естественный русский>
 """;
 
-string BuildFullPrompt(string word, string context) => $"""
+string BuildFullPrompt(string word, string context, StudyLanguage language) => $"""
 Ты — точный словарь-переводчик, который готовит карточку для заучивания слова.
 
+Язык слова и контекста: {language.RussianName}. Переводить нужно на русский.
 Слово: "{word}"
 Текст вокруг слова (несколько строк с экрана, снятых через OCR; могут попасть куски соседних предложений, опечатки и потерянные знаки препинания): "{context}"
 
@@ -98,10 +100,10 @@ string BuildFullPrompt(string word, string context) => $"""
 """;
 
 async Task<string?> GetLightTranslationReply(string word, string context) =>
-    await RequestGeminiReply(BuildLightPrompt(word, context), "light");
+    await RequestGeminiReply(BuildLightPrompt(word, context, StudyLanguages.Current), "light");
 
 async Task<string?> GetFullTranslationReply(string word, string context) =>
-    await RequestGeminiReply(BuildFullPrompt(word, context), "full");
+    await RequestGeminiReply(BuildFullPrompt(word, context, StudyLanguages.Current), "full");
 
 string? GetApiKey()
 {
@@ -588,19 +590,20 @@ async Task<IReadOnlyList<OcrLineResult>?> RecognizeLines(string path)
 
     try
     {
-        var englishLines = await RunOcrPass(preprocessedPath, "en", scale, isRequired: true);
-        if (englishLines is null)
+        var studyLanguage = StudyLanguages.Current;
+        var targetLines = await RunOcrPass(preprocessedPath, studyLanguage.OcrTag, scale, isRequired: true, studyLanguage);
+        if (targetLines is null)
         {
             return null;
         }
 
-        var russianLines = await RunOcrPass(preprocessedPath, "ru", scale, isRequired: false);
+        var russianLines = await RunOcrPass(preprocessedPath, "ru", scale, isRequired: false, studyLanguage);
         if (russianLines is null || russianLines.Count == 0)
         {
-            return englishLines;
+            return targetLines;
         }
 
-        return MergeLines(englishLines, russianLines);
+        return MergeLines(targetLines, russianLines);
     }
     finally
     {
@@ -614,7 +617,7 @@ async Task<IReadOnlyList<OcrLineResult>?> RecognizeLines(string path)
     }
 }
 
-async Task<List<OcrLineResult>?> RunOcrPass(string path, string languageTag, double scale, bool isRequired)
+async Task<List<OcrLineResult>?> RunOcrPass(string path, string languageTag, double scale, bool isRequired, StudyLanguage studyLanguage)
 {
     var language = new Language(languageTag);
 
@@ -622,11 +625,11 @@ async Task<List<OcrLineResult>?> RunOcrPass(string path, string languageTag, dou
     {
         if (isRequired)
         {
-            PrintOcrLanguageMissingMessage();
+            PrintOcrLanguageMissingMessage(studyLanguage);
         }
         else
         {
-            WarnRussianOcrMissingOnce();
+            WarnRussianOcrMissingOnce(studyLanguage);
         }
 
         return null;
@@ -637,11 +640,11 @@ async Task<List<OcrLineResult>?> RunOcrPass(string path, string languageTag, dou
     {
         if (isRequired)
         {
-            PrintOcrLanguageMissingMessage();
+            PrintOcrLanguageMissingMessage(studyLanguage);
         }
         else
         {
-            WarnRussianOcrMissingOnce();
+            WarnRussianOcrMissingOnce(studyLanguage);
         }
 
         return null;
@@ -839,18 +842,18 @@ string BuildWideContext(IReadOnlyList<OcrLineResult> lines, int lineIndex)
     return string.Join(" ", contextLines);
 }
 
-void PrintOcrLanguageMissingMessage()
+void PrintOcrLanguageMissingMessage(StudyLanguage studyLanguage)
 {
     ShowWarning(
-        "Windows OCR для английского языка недоступен на этом компьютере.\n\n" +
+        $"Windows OCR для языка «{studyLanguage.DisplayName}» недоступен на этом компьютере.\n\n" +
         "Как включить:\n" +
         "1. Параметры Windows -> Время и язык -> Язык и регион\n" +
-        "2. Добавить язык -> выбери English\n" +
+        $"2. Добавить язык -> выбери {studyLanguage.DisplayName} ({studyLanguage.NativeName})\n" +
         "3. При установке отметь распознавание текста (OCR), если это предложено\n" +
         "4. Дождись установки и перезапусти программу");
 }
 
-void WarnRussianOcrMissingOnce()
+void WarnRussianOcrMissingOnce(StudyLanguage studyLanguage)
 {
     if (russianOcrWarningShown)
     {
@@ -858,10 +861,10 @@ void WarnRussianOcrMissingOnce()
     }
 
     russianOcrWarningShown = true;
-    LogDebug("Русский OCR-пакет не найден, распознавание работает только на английском.");
+    LogDebug($"Русский OCR-пакет не найден, распознавание работает только на языке «{studyLanguage.DisplayName}».");
 
     ShowWarning(
-        "Windows OCR для русского языка недоступен на этом компьютере — распознаётся только английский.\n\n" +
+        $"Windows OCR для русского языка недоступен на этом компьютере — распознаётся только {studyLanguage.RussianName}.\n\n" +
         "Как включить русский:\n" +
         "1. Параметры Windows -> Время и язык -> Язык и регион\n" +
         "2. Добавить язык -> выбери Русский\n" +

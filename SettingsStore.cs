@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text.Json;
 
-record AppSettings(string? ApiKey = null);
+record AppSettings(string? ApiKey = null, string? StudyLanguageCode = null);
 
 static class SettingsStore
 {
