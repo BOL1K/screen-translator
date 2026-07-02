@@ -18,4 +18,8 @@
     <Using Remove="System.Windows.Forms" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Anki.NET" Version="2.0.0" />
+  </ItemGroup>
+
 </Project>

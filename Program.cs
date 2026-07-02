@@ -55,6 +55,7 @@ TrayIcon.NewTranslationRequested += () => NewTranslationWindow.Show(async (sente
 
 TrayIcon.ShowDictionaryRequested += () => DictionaryWindow.Show(LoadEntries());
 TrayIcon.ChooseModelRequested += () => ModelWindow.Show();
+TrayIcon.ExportToAnkiRequested += () => AnkiExporter.Export(LoadEntries());
 
 TrayIcon.Start();
 
