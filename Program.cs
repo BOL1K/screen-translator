@@ -554,7 +554,8 @@ async Task SaveTranslation(string word, string context, Windows.Foundation.Rect?
         Sentence: context,
         ContextTranslation: display.ContextTranslation,
         Hint: card.Hint,
-        Transcription: card.Transcription));
+        Transcription: card.Transcription,
+        AddedAt: DateTime.Now));
 }
 
 async Task<IReadOnlyList<OcrLine>?> RecognizeLines(string path)
@@ -744,6 +745,7 @@ record DictionaryEntry(
     string Sentence,
     string ContextTranslation = "",
     string Hint = "",
-    string Transcription = "");
+    string Transcription = "",
+    DateTime? AddedAt = null);
 
 record GeminiCallResult(bool Success, string? Text, bool IsDailyQuotaExceeded, bool IsPerMinuteRateLimited, string? ErrorMessage, bool IsNetworkError = false);
