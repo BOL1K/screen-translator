@@ -2,7 +2,13 @@ using System.IO;
 using System.Text.Json;
 
 // OcrEngineCode: "windows" (по умолчанию) или "paddle" (PaddleOCR — точнее на игровых шрифтах, но медленнее).
-record AppSettings(string? ApiKey = null, string? StudyLanguageCode = null, string? OcrEngineCode = null);
+// PaddleDeviceMode: "cpu" (по умолчанию) или "gpu" (NVIDIA CUDA; нужна GPU-сборка, видеокарта и cuDNN,
+// иначе программа сама откатится на CPU с предупреждением).
+record AppSettings(
+    string? ApiKey = null,
+    string? StudyLanguageCode = null,
+    string? OcrEngineCode = null,
+    string? PaddleDeviceMode = null);
 
 static class SettingsStore
 {

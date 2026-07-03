@@ -194,6 +194,46 @@ static class SettingsWindow
 
         string SelectedEngineCode() => (engineList.SelectedItem as ListBoxItem)?.Tag as string ?? "windows";
 
+        var modeLabel = new TextBlock
+        {
+            Text = "Режим PaddleOCR",
+            Foreground = AppTheme.TextBrush,
+            Margin = new Thickness(0, 8, 0, 4),
+        };
+        panel.Children.Add(modeLabel);
+
+        var modeList = new ListBox
+        {
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            ItemContainerStyle = AppTheme.CreateListBoxItemStyle(),
+            Margin = new Thickness(0, 0, 0, 2),
+        };
+        modeList.Items.Add(MakeEngineItem(
+            "cpu",
+            "CPU",
+            "Работает на любом компьютере."));
+        modeList.Items.Add(MakeEngineItem(
+            "gpu",
+            "GPU (NVIDIA CUDA) — в разы быстрее",
+            "Нужна GPU-сборка программы, видеокарта NVIDIA и библиотеки cuDNN/cuBLAS.\n" +
+            "Если что-то не так — программа сама вернётся на CPU, без падения."));
+        modeList.SelectedIndex = settings.PaddleDeviceMode == "gpu" ? 1 : 0;
+        panel.Children.Add(modeList);
+
+        string SelectedModeCode() => (modeList.SelectedItem as ListBoxItem)?.Tag as string ?? "cpu";
+
+        void RefreshModeEnabled()
+        {
+            var paddleSelected = SelectedEngineCode() == "paddle";
+            modeLabel.Opacity = paddleSelected ? 1.0 : 0.4;
+            modeList.Opacity = paddleSelected ? 1.0 : 0.4;
+            modeList.IsEnabled = paddleSelected;
+        }
+
+        engineList.SelectionChanged += (_, _) => RefreshModeEnabled();
+        RefreshModeEnabled();
+
         panel.Children.Add(new TextBlock
         {
             Text = "Как получить бесплатный ключ:",
@@ -231,7 +271,7 @@ static class SettingsWindow
             }
 
             var selectedLanguage = SelectedLanguage() ?? currentLanguage;
-            SettingsStore.Save(new AppSettings(value, selectedLanguage.Code, SelectedEngineCode()));
+            SettingsStore.Save(new AppSettings(value, selectedLanguage.Code, SelectedEngineCode(), SelectedModeCode()));
             savedKey = value;
             window.Close();
         };

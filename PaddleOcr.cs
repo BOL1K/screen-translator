@@ -1,42 +1,49 @@
+using System.IO;
+using System.Runtime.InteropServices;
 using OpenCvSharp;
 using Sdcb.PaddleInference;
 using Sdcb.PaddleOCR;
 using Sdcb.PaddleOCR.Models;
 using Sdcb.PaddleOCR.Models.Local;
+using Sdcb.PaddleOCR.Models.Online;
 
 // Второй OCR-движок (PaddleOCR / PP-OCRv5) — заметно точнее Windows OCR на стилизованных
-// и игровых шрифтах, но в разы медленнее на CPU. Поэтому он опциональный (настройки),
+// и игровых шрифтах, но на CPU в разы медленнее. Поэтому он опциональный (настройки),
 // а для перевода под курсором распознаётся только область вокруг курсора, не весь экран.
+//
+// Режим GPU (NVIDIA CUDA) требует: сборку с GPU-библиотеками (dotnet publish -p:PaddleGpu=true),
+// видеокарту NVIDIA с свежим драйвером и библиотеки cuDNN 9 + cuBLAS 12 — либо в PATH,
+// либо в папке "cuda" рядом с exe. Если что-то из этого не так, движок сам откатывается
+// на CPU с одним предупреждением за сеанс.
 static class PaddleOcr
 {
+    // Прокидываются из Program.cs при старте: показ предупреждений и debug-лог.
+    public static Action<string>? Warn;
+    public static Action<string>? Log;
+
     // PaddleOcrAll не потокобезопасен, а создание движка стоит ~1 секунду —
-    // держим один экземпляр под замком и пересоздаём только при смене языка.
+    // держим один экземпляр под замком и пересоздаём при смене языка или режима.
     private static readonly object EngineLock = new();
     private static PaddleOcrAll? _engine;
     private static string? _engineLanguageCode;
+    private static bool _engineIsGpu;
+    private static bool _gpuFailedThisSession;
+    private static bool _gpuPathPrepared;
 
     // Область вокруг курсора для Alt+Q / Alt+E: полный экран PaddleOCR на CPU
     // обрабатывает ~10 секунд, такой кроп — ~3 секунды, а предложение-контекст
-    // в него всё равно помещается.
+    // в него всё равно помещается. На GPU это тоже ускоряет отклик.
     private const int FocusCropWidth = 1100;
     private const int FocusCropHeight = 700;
 
-    public static List<OcrLineResult> RecognizeLines(string imagePath, StudyLanguage language, (int X, int Y)? focusImagePoint)
+    public static List<OcrLineResult> RecognizeLines(string imagePath, StudyLanguage language, (int X, int Y)? focusImagePoint, bool preferGpu)
     {
         lock (EngineLock)
         {
-            if (_engine is null || _engineLanguageCode != language.Code)
+            var wantGpu = preferGpu && !_gpuFailedThisSession;
+            if (_engine is null || _engineLanguageCode != language.Code || _engineIsGpu != wantGpu)
             {
-                _engine?.Dispose();
-                _engine = null;
-                _engineLanguageCode = null;
-
-                _engine = new PaddleOcrAll(ModelFor(language.Code), PaddleDevice.Mkldnn())
-                {
-                    AllowRotateDetection = false,
-                    Enable180Classification = false,
-                };
-                _engineLanguageCode = language.Code;
+                RecreateEngine(language, wantGpu);
             }
 
             using var fullImage = Cv2.ImRead(imagePath, ImreadModes.Color);
@@ -47,15 +54,20 @@ static class PaddleOcr
 
             var roi = BuildRoi(fullImage, focusImagePoint);
 
+            // Замерено на RTX 4050: на GPU распознавание фрагментов пачками по 64 ускоряет
+            // полный экран с ~9 до ~2.6 секунд (меньше перенастроек ядер под размер входа),
+            // а на CPU то же батчирование наоборот замедляет — там оставляем по одному.
+            var recognizeBatchSize = _engineIsGpu ? 64 : 0;
+
             PaddleOcrResult result;
             if (roi is { } cropRect)
             {
                 using var cropped = new Mat(fullImage, cropRect);
-                result = _engine.Run(cropped);
+                result = _engine!.Run(cropped, recognizeBatchSize);
             }
             else
             {
-                result = _engine.Run(fullImage);
+                result = _engine!.Run(fullImage, recognizeBatchSize);
             }
 
             var offsetX = roi?.X ?? 0;
@@ -69,7 +81,108 @@ static class PaddleOcr
         }
     }
 
-    private static FullOcrModel ModelFor(string languageCode) => languageCode switch
+    private static void RecreateEngine(StudyLanguage language, bool wantGpu)
+    {
+        _engine?.Dispose();
+        _engine = null;
+        _engineLanguageCode = null;
+
+        if (wantGpu)
+        {
+            try
+            {
+                _engine = CreateGpuEngine(language);
+                _engineIsGpu = true;
+                _engineLanguageCode = language.Code;
+                Log?.Invoke($"PaddleOCR: GPU-движок создан для языка {language.Code}");
+                return;
+            }
+            catch (Exception ex)
+            {
+                _gpuFailedThisSession = true;
+                Log?.Invoke($"PaddleOCR GPU: не удалось запустить, откатываюсь на CPU: {ex}");
+                Warn?.Invoke(
+                    "GPU-режим PaddleOCR недоступен, переключился на CPU (до перезапуска программы).\n\n" +
+                    "Возможные причины:\n" +
+                    "- эта сборка программы без GPU-библиотек (нужна GPU-сборка);\n" +
+                    "- нет видеокарты NVIDIA или драйвер устарел;\n" +
+                    "- не найдены cuDNN 9 / cuBLAS 12 (положи их DLL в папку \"cuda\" рядом с exe).\n\n" +
+                    "Подробности в gemini_debug.log.");
+            }
+        }
+
+        _engine = new PaddleOcrAll(LocalModelFor(language.Code), PaddleDevice.Mkldnn())
+        {
+            AllowRotateDetection = false,
+            Enable180Classification = false,
+        };
+        _engineIsGpu = false;
+        _engineLanguageCode = language.Code;
+    }
+
+    private static PaddleOcrAll CreateGpuEngine(StudyLanguage language)
+    {
+        PrepareGpuEnvironment();
+
+        // Отсутствующие CUDA-библиотеки Paddle обнаруживает уже во время инференции
+        // и роняет весь процесс нативно (fail-fast, try/catch не спасает). Поэтому
+        // проверяем их загружаемость заранее и при проблеме кидаем обычное исключение.
+        foreach (var dll in new[] { "cudnn64_9.dll", "cublas64_12.dll", "cublasLt64_12.dll" })
+        {
+            if (!NativeLibrary.TryLoad(dll, out _))
+            {
+                throw new DllNotFoundException($"Не найдена библиотека {dll} (ни в PATH, ни в папке cuda рядом с exe).");
+            }
+        }
+
+        // GPU-предиктор Paddle 3.3 не умеет загружать модель из памяти (падает с ошибкой
+        // парсинга JSON), поэтому для GPU используются файловые модели: при первом
+        // включении они один раз скачиваются (~20 МБ) в paddle_models рядом с exe.
+        var model = DownloadOnlineModel(language);
+
+        return new PaddleOcrAll(model, PaddleDevice.Gpu())
+        {
+            AllowRotateDetection = false,
+            Enable180Classification = false,
+        };
+    }
+
+    private static void PrepareGpuEnvironment()
+    {
+        if (_gpuPathPrepared)
+        {
+            return;
+        }
+
+        _gpuPathPrepared = true;
+
+        // Папка "cuda" рядом с exe — место, куда пользователь кладёт DLL из архивов
+        // cuDNN и cuBLAS, чтобы не ставить весь CUDA Toolkit и не трогать системный PATH.
+        var cudaDir = AppPaths.Resolve("cuda");
+        if (Directory.Exists(cudaDir))
+        {
+            Environment.SetEnvironmentVariable(
+                "PATH",
+                cudaDir + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH"));
+        }
+    }
+
+    private static FullOcrModel DownloadOnlineModel(StudyLanguage language)
+    {
+        Settings.GlobalModelDirectory = AppPaths.Resolve("paddle_models");
+
+        var onlineModel = language.Code switch
+        {
+            "de" or "fr" or "es" => OnlineFullModels.LatinV5,
+            "ko" => OnlineFullModels.KoreanV5,
+            "ja" or "zh" => OnlineFullModels.ChineseV5,
+            _ => OnlineFullModels.EnglishV5,
+        };
+
+        return onlineModel.DownloadAsync().GetAwaiter().GetResult();
+    }
+
+    private static FullOcrModel LocalModelFor(string languageCode) => languageCode switch
     {
         "de" or "fr" or "es" => LocalFullModels.LatinV5,
         "ko" => LocalFullModels.KoreanV5,

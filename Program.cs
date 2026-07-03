@@ -38,6 +38,9 @@ string DescribeResult(GeminiCallResult result) => result switch
 
 NativeMethods.SetProcessDpiAwarenessContext(new IntPtr(-4));
 
+PaddleOcr.Warn = ShowWarning;
+PaddleOcr.Log = LogDebug;
+
 var hotkeyThread = new Thread(RunScreenshotHotkeyMode) { IsBackground = true };
 hotkeyThread.Start();
 
@@ -586,13 +589,14 @@ async Task SaveTranslation(string word, string context, Windows.Foundation.Rect?
 
 async Task<IReadOnlyList<OcrLineResult>?> RecognizeLines(string path, (int X, int Y)? focusImagePoint = null)
 {
-    if (SettingsStore.Load().OcrEngineCode == "paddle")
+    var ocrSettings = SettingsStore.Load();
+    if (ocrSettings.OcrEngineCode == "paddle")
     {
         try
         {
             // Paddle работает по исходному скриншоту (масштаб 1:1, координаты уже экранные),
             // препроцессинг для Windows OCR ему не нужен.
-            return PaddleOcr.RecognizeLines(path, StudyLanguages.Current, focusImagePoint);
+            return PaddleOcr.RecognizeLines(path, StudyLanguages.Current, focusImagePoint, ocrSettings.PaddleDeviceMode == "gpu");
         }
         catch (Exception ex)
         {
