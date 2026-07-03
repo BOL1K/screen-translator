@@ -9,11 +9,13 @@ using System.Runtime.InteropServices;
 // Настройки ниже можно крутить/выключать по отдельности.
 static class OcrPreprocessor
 {
-    public const float UpscaleFactor = 2.5f;
-    public const bool EnableGrayscaleContrast = true;
-    public const float ContrastBoost = 1.3f;
-    public const bool EnableBinarization = false;
-    public const byte BinarizationThreshold = 140;
+    // static readonly, а не const — с const компилятор считает выключенные ветки
+    // недостижимым кодом (CS0162), хотя это просто настройки для ручного тюнинга.
+    public static readonly float UpscaleFactor = 2.5f;
+    public static readonly bool EnableGrayscaleContrast = true;
+    public static readonly float ContrastBoost = 1.3f;
+    public static readonly bool EnableBinarization = false;
+    public static readonly byte BinarizationThreshold = 140;
 
     // Возвращает путь к обработанной картинке и коэффициент апскейла
     // (им нужно поделить координаты слов от OCR, чтобы вернуться в систему исходного скриншота).
