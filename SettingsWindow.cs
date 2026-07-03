@@ -155,6 +155,45 @@ static class SettingsWindow
         languageList.SelectionChanged += (_, _) => RefreshOcrHint();
         RefreshOcrHint();
 
+        panel.Children.Add(AppTheme.CreateDivider());
+
+        panel.Children.Add(new TextBlock
+        {
+            Text = "OCR-движок (распознавание текста на экране)",
+            Foreground = AppTheme.TextBrush,
+            Margin = new Thickness(0, 10, 0, 4),
+        });
+
+        var engineList = new ListBox
+        {
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            ItemContainerStyle = AppTheme.CreateListBoxItemStyle(),
+            Margin = new Thickness(0, 0, 0, 2),
+        };
+
+        ListBoxItem MakeEngineItem(string code, string title, string note)
+        {
+            var itemText = new TextBlock { TextWrapping = TextWrapping.Wrap };
+            itemText.Inlines.Add(new Run(title) { Foreground = AppTheme.HeadingBrush });
+            itemText.Inlines.Add(new Run($"\n{note}") { Foreground = AppTheme.TextBrush, FontSize = 11 });
+            return new ListBoxItem { Content = itemText, Tag = code };
+        }
+
+        engineList.Items.Add(MakeEngineItem(
+            "windows",
+            "Windows OCR — быстрый (рекомендуется)",
+            "Мгновенное распознавание, лучший выбор для обычного текста."));
+        engineList.Items.Add(MakeEngineItem(
+            "paddle",
+            "PaddleOCR — точнее на стилизованных и игровых шрифтах",
+            "Медленнее: перевод под курсором ~3–5 секунд, оверлей Alt+W — 10–20 секунд."));
+
+        engineList.SelectedIndex = settings.OcrEngineCode == "paddle" ? 1 : 0;
+        panel.Children.Add(engineList);
+
+        string SelectedEngineCode() => (engineList.SelectedItem as ListBoxItem)?.Tag as string ?? "windows";
+
         panel.Children.Add(new TextBlock
         {
             Text = "Как получить бесплатный ключ:",
@@ -192,7 +231,7 @@ static class SettingsWindow
             }
 
             var selectedLanguage = SelectedLanguage() ?? currentLanguage;
-            SettingsStore.Save(new AppSettings(value, selectedLanguage.Code));
+            SettingsStore.Save(new AppSettings(value, selectedLanguage.Code, SelectedEngineCode()));
             savedKey = value;
             window.Close();
         };

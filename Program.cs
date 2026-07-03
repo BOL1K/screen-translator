@@ -584,8 +584,26 @@ async Task SaveTranslation(string word, string context, Windows.Foundation.Rect?
         AddedAt: DateTime.Now));
 }
 
-async Task<IReadOnlyList<OcrLineResult>?> RecognizeLines(string path)
+async Task<IReadOnlyList<OcrLineResult>?> RecognizeLines(string path, (int X, int Y)? focusImagePoint = null)
 {
+    if (SettingsStore.Load().OcrEngineCode == "paddle")
+    {
+        try
+        {
+            // Paddle работает по исходному скриншоту (масштаб 1:1, координаты уже экранные),
+            // препроцессинг для Windows OCR ему не нужен.
+            return PaddleOcr.RecognizeLines(path, StudyLanguages.Current, focusImagePoint);
+        }
+        catch (Exception ex)
+        {
+            LogDebug($"PaddleOCR: ошибка распознавания: {ex}");
+            ShowWarning(
+                "PaddleOCR не смог распознать экран (подробности в gemini_debug.log).\n" +
+                "Переключи OCR-движок обратно на Windows OCR в настройках.");
+            return null;
+        }
+    }
+
     var (preprocessedPath, scale) = OcrPreprocessor.Preprocess(path);
 
     try
@@ -790,14 +808,14 @@ async Task<List<(string Text, string Context, Windows.Foundation.Rect Rect)>?> R
 
 async Task<(string Word, string Context, Windows.Foundation.Rect ScreenRect)?> FindWordAndContextUnderCursor(string path, int originX, int originY, int cursorScreenX, int cursorScreenY)
 {
-    var lines = await RecognizeLines(path);
+    var cursorImageX = cursorScreenX - originX;
+    var cursorImageY = cursorScreenY - originY;
+
+    var lines = await RecognizeLines(path, (cursorImageX, cursorImageY));
     if (lines is null)
     {
         return null;
     }
-
-    var cursorImageX = cursorScreenX - originX;
-    var cursorImageY = cursorScreenY - originY;
 
     for (var lineIndex = 0; lineIndex < lines.Count; lineIndex++)
     {

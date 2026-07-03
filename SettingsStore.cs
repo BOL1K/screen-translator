@@ -1,7 +1,8 @@
 using System.IO;
 using System.Text.Json;
 
-record AppSettings(string? ApiKey = null, string? StudyLanguageCode = null);
+// OcrEngineCode: "windows" (по умолчанию) или "paddle" (PaddleOCR — точнее на игровых шрифтах, но медленнее).
+record AppSettings(string? ApiKey = null, string? StudyLanguageCode = null, string? OcrEngineCode = null);
 
 static class SettingsStore
 {

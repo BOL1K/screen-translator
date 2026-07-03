@@ -9,6 +9,9 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <Version>1.1.0</Version>
+    <!-- Нативные библиотеки PaddleOCR раздувают single-file exe до ~690 МБ,
+         сжатие бандла ужимает его до ~315 МБ ценой чуть более долгого первого запуска. -->
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
 
   <ItemGroup>
@@ -21,6 +24,11 @@
 
   <ItemGroup>
     <PackageReference Include="Anki.NET" Version="2.0.0" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.11.0.20250507" />
+    <PackageReference Include="Sdcb.PaddleInference.runtime.win64.mkl" Version="3.3.1.70" />
+    <PackageReference Include="Sdcb.PaddleOCR" Version="3.3.1" />
+    <PackageReference Include="Sdcb.PaddleOCR.Models.Local" Version="3.3.1" />
+    <PackageReference Include="Sdcb.PaddleOCR.Models.LocalV5" Version="3.3.1" />
   </ItemGroup>
 
 </Project>
